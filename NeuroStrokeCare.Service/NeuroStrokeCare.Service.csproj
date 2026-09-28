@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ملاحظة: الفولدرين دول فيهم كود قديم (Service Layer Pattern) من مرحلة سابقة قبل ما نستقر
+         على CQRS + Generic Repository. مش بيتبني عشان مفيهوش أي حاجة شغالة/مستخدمة حاليًا.
+         الـ Auth الجديد اتحط في فولدر Auth\ منفصل عشان يتبني عادي. -->
+    <Compile Remove="Implementation\**" />
+    <Compile Remove="Interfaces\**" />
+    <EmbeddedResource Remove="Implementation\**" />
+    <EmbeddedResource Remove="Interfaces\**" />
+    <None Remove="Implementation\**" />
+    <None Remove="Interfaces\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NeuroStrokeCare.Data\NeuroStrokeCare.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.11" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.22.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.22.0" />
+  </ItemGroup>
+
+</Project>

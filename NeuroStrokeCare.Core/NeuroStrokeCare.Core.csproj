@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NeuroStrokeCare.Data\NeuroStrokeCare.Data.csproj" />
+    <ProjectReference Include="..\NeuroStrokeCare.infrastructure\NeuroStrokeCare.infrastructure.csproj" />
+    <ProjectReference Include="..\NeuroStrokeCare.Service\NeuroStrokeCare.Service.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Features\BaseService\Commands\Validatiors\" />
+    <Folder Include="Features\BaseService\Queries\Validatiors\" />
+    <Folder Include="Mapping\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- AutoMapper.Extensions.Microsoft.DependencyInjection قديم ومتوقف (Deprecated) وفيه ثغرة أمنية،
+         ودلوقتي الـ DI بتاعه (services.AddAutoMapper) بقى جوه AutoMapper نفسه من غير ما نحتاج
+         الباكدج المنفصل ده خالص -->
+    <PackageReference Include="AutoMapper" Version="16.2.0" />
+    <PackageReference Include="MediatR" Version="14.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Localization" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>

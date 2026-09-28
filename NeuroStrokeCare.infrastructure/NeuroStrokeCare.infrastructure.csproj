@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!-- محتاجينها عشان AddDefaultTokenProviders (وأي API تانية بتخص Identity بتيجي مع
+       الـ Shared Framework بتاع ASP.NET Core) مش موجودة في الـ NuGet Package العادي
+       (Microsoft.Extensions.Identity.Core)، وده مشروع Class Library مش Web SDK -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NeuroStrokeCare.Data\NeuroStrokeCare.Data.csproj" />
+  </ItemGroup>
+
+</Project>

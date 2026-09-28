@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="NeuroStrokeCare.api/NeuroStrokeCare.api.csproj" />
+  <Project Path="NeuroStrokeCare.Core/NeuroStrokeCare.Core.csproj" />
+  <Project Path="NeuroStrokeCare.Data/NeuroStrokeCare.Data.csproj" />
+  <Project Path="NeuroStrokeCare.infrastructure/NeuroStrokeCare.infrastructure.csproj" />
+  <Project Path="NeuroStrokeCare.Service/NeuroStrokeCare.Service.csproj" />
+</Solution>
