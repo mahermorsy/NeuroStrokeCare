@@ -22,5 +22,9 @@ namespace NeuroStrokeCare.Core.Features.Admission.Dtos
         public string? CTFindings { get; set; }
         public string? MRIFindings { get; set; }
         public string? CTAFindings { get; set; }
+        public DateTime? ThrombolysisGivenAt { get; set; }
+        public string? ThrombolysisDrug { get; set; }
+        public decimal? ThrombolysisDoseMg { get; set; }
+        public Guid? ThrombolysisRecordedById { get; set; }
     }
 }

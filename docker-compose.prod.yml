@@ -28,6 +28,14 @@ services:
       Jwt__Audience: ${JWT_AUDIENCE:-NeuroStrokeCare.Client}
       Jwt__DurationInMinutes: ${JWT_DURATION_MINUTES:-60}
       SeedUsers__DefaultPassword: ${SEED_USERS_DEFAULT_PASSWORD:-}
+      Email__SmtpHost: ${SMTP_HOST:-}
+      Email__SmtpPort: ${SMTP_PORT:-587}
+      Email__SmtpUsername: ${SMTP_USERNAME:-}
+      Email__SmtpPassword: ${SMTP_PASSWORD:-}
+      Email__EnableSsl: ${SMTP_ENABLE_SSL:-true}
+      Email__FromAddress: ${SMTP_FROM_ADDRESS:-}
+      Email__FromName: ${SMTP_FROM_NAME:-NeuroStrokeCare}
+      Email__FrontendResetUrl: ${FRONTEND_RESET_URL:-}
     depends_on:
       db:
         condition: service_healthy

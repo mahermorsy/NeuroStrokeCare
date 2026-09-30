@@ -28,6 +28,13 @@ namespace NeuroStrokeCare.Data.Entities
         public string? CTFindings { get; set; }   // النتيجة نصية
         public string? MRIFindings { get; set; }
         public string? CTAFindings { get; set; }
+
+        // Thrombolysis administration — timestamps the 24h antithrombotic lockout window.
+        public DateTime? ThrombolysisGivenAt { get; set; }
+        public string? ThrombolysisDrug { get; set; }   // "Alteplase" or "Tenecteplase"
+        public decimal? ThrombolysisDoseMg { get; set; }
+        public Guid? ThrombolysisRecordedById { get; set; }
+
         // Navigation
         public Patient Patient { get; set; }
         public ApplicationUser AdmittedBy { get; set; }

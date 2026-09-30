@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useAuth } from '@/context/AuthContext'
 import { LogoMark } from '@/components/icons'
@@ -67,6 +67,15 @@ export default function Login() {
               placeholder="••••••••"
             />
           </label>
+
+          <div className="-mt-2 flex items-center justify-between text-[12.5px] font-medium">
+            <Link to="/request-account" className="text-accent hover:underline">
+              Request an account
+            </Link>
+            <Link to="/forgot-password" className="text-accent hover:underline">
+              Forgot password?
+            </Link>
+          </div>
 
           {error && (
             <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">

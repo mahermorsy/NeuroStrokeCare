@@ -41,6 +41,25 @@ export function ClipboardPlusIcon(props: IconProps) {
   )
 }
 
+export function NoteIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M6 3h9l5 5v13a1 1 0 01-1 1H6a1 1 0 01-1-1V4a1 1 0 011-1z" />
+      <path d="M14 3v5h5" />
+      <path d="M8 13h8M8 17h5" />
+    </svg>
+  )
+}
+
+export function AlertIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 3l9 16H3l9-16z" />
+      <path d="M12 10v4M12 17.5v.1" />
+    </svg>
+  )
+}
+
 export function BedIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>

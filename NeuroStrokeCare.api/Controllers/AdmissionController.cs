@@ -129,6 +129,10 @@ namespace NeuroStrokeCare.api.Controllers
         }
 
         // PUT: api/admission?actingUserId=...
+        // ملحوظة أمان: PUT ده Update أعمى (بيستبدل كل الحقول) - معندوش أي تحقق من إشغال
+        // السرير أو تحرير القديم زي /transfer. عشان منفتحش نفس ثغرة حجز نفس السرير مرتين
+        // من هنا، بنمنع أي تغيير في BedId من الطريق ده خالص - أي نقل/تغيير سرير لازم يعدي
+        // على PATCH /{id}/transfer اللي فيها كل الحماية (فحص الإشغال + قفل الداتابيز).
         [Authorize(Roles = Roles.AnyDoctor)]
         [HttpPut]
         public async Task<IActionResult> Update(
@@ -136,8 +140,27 @@ namespace NeuroStrokeCare.api.Controllers
             [FromQuery] Guid actingUserId,
             CancellationToken cancellationToken)
         {
+            var current = await _context.Set<Admission>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == request.Id, cancellationToken);
+
+            if (current == null)
+                return NotFound();
+
+            if (current.BedId != request.BedId)
+            {
+                return BadRequest(new
+                {
+                    message = "Bed changes must go through PATCH /admission/{id}/transfer, which safely checks vacancy - not this general update."
+                });
+            }
+
             var admission = _mapper.Map<Admission>(request);
-            admission.AdmittedById = actingUserId;
+
+            // ثابتة من أول ما اتعمل الإدخال - مش بتتغير أبدًا بعد كده حتى لو حد تاني عدّل
+            // بيانات الإدخال، عشان سجل "مين قبل المريض فعليًا" يفضل صحيح لأي مراجعة/تدقيق
+            // لاحقة. اللي بيتغير مع كل تعديل هو UpdatedBy (بيتحط تلقائيًا من UpdateCommand).
+            admission.AdmittedById = current.AdmittedById;
 
             var command = new UpdateCommand<Admission>(admission, actingUserId);
             var affectedRows = await _mediator.Send(command, cancellationToken);
@@ -256,6 +279,84 @@ namespace NeuroStrokeCare.api.Controllers
                 Action = "StatusChanged",
                 UserId = actingUserId,
                 Details = $"NewState={(int)newStatus}",
+                Timestamp = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return NoContent();
+        }
+
+        // PATCH: api/admission/{id}/stroke-type
+        // الطريقة الآمنة الوحيدة لتحديد/تعديل نوع السكتة (Ischemic/Hemorrhagic/TIA) لإدخال معين.
+        // مقصودة كـ Command منفصل (مش جزء من الـ PUT العام) عشان: تسجل مين حددها وامتى تلقائيًا،
+        // وتفضل الحقول التانية في الإدخال زي ما هي من غير خطر إنها تتصفر بسبب PUT أعمى.
+        [Authorize(Roles = Roles.AnyDoctor)]
+        [HttpPatch("{id:guid}/stroke-type")]
+        public async Task<IActionResult> SetStrokeType(
+            Guid id,
+            [FromQuery] Guid actingUserId,
+            [FromQuery] StrokeType strokeType,
+            CancellationToken cancellationToken = default)
+        {
+            var admission = await _context.Set<Admission>().FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+            if (admission == null)
+                return NotFound();
+
+            admission.StrokeType = strokeType;
+            admission.StrokeTypeSetAt = DateTime.UtcNow;
+            admission.StrokeTypeSetById = actingUserId;
+            admission.UpdatedBy = actingUserId;
+            admission.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _context.Set<AuditLog>().Add(new AuditLog
+            {
+                EntityName = nameof(Admission),
+                EntityId = id,
+                Action = "StrokeTypeSet",
+                UserId = actingUserId,
+                Details = $"StrokeType={(int)strokeType}",
+                Timestamp = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync(cancellationToken);
+
+            return NoContent();
+        }
+
+        // PATCH: api/admission/{id}/thrombolysis
+        // بيسجل إن المريض اتحقن بالمذيب (Alteplase/Tenecteplase) وامتى بالظبط — التوقيت ده هو
+        // اللي بتتحسب عليه نافذة الـ 24 ساعة اللي المفروض ما ياخدش فيها أي مضاد تجلط/صفائح تاني
+        // (Antithrombotic lockout)، وده بيتعرض كتنبيه في صفحة الـ Alerts لحد ما الـ 24 ساعة تخلص.
+        [Authorize(Roles = Roles.AnyDoctor)]
+        [HttpPatch("{id:guid}/thrombolysis")]
+        public async Task<IActionResult> RecordThrombolysis(
+            Guid id,
+            [FromQuery] Guid actingUserId,
+            [FromQuery] string drug,
+            [FromQuery] decimal doseMg,
+            CancellationToken cancellationToken = default)
+        {
+            var admission = await _context.Set<Admission>().FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+            if (admission == null)
+                return NotFound();
+
+            admission.ThrombolysisGivenAt = DateTime.UtcNow;
+            admission.ThrombolysisDrug = drug;
+            admission.ThrombolysisDoseMg = doseMg;
+            admission.ThrombolysisRecordedById = actingUserId;
+            admission.UpdatedBy = actingUserId;
+            admission.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _context.Set<AuditLog>().Add(new AuditLog
+            {
+                EntityName = nameof(Admission),
+                EntityId = id,
+                Action = "ThrombolysisRecorded",
+                UserId = actingUserId,
+                Details = $"Drug={drug}, DoseMg={doseMg}",
                 Timestamp = DateTime.UtcNow
             });
             await _context.SaveChangesAsync(cancellationToken);

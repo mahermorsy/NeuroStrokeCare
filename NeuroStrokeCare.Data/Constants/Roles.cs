@@ -16,5 +16,6 @@ namespace NeuroStrokeCare.Data.Constants
 
         // التمريض ومشرف التمريض - اختبارات الرعاية التمريضية (Braden, Morse, GUSS)
         public const string AnyNurse = Admin + "," + Nurse + "," + NursingSupervisor;
+            public const string AnyClinical = AnyDoctor + "," + Nurse + "," + NursingSupervisor;
     }
 }

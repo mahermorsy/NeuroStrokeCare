@@ -25,6 +25,23 @@ docker compose -f docker-compose.prod.yml up -d --build
 - `JWT_DURATION_MINUTES`
 - `DB_NAME`
 
+## Optional environment variables (password-reset emails)
+
+Leave `SMTP_HOST` blank to keep email sending disabled — the API just logs a
+warning and "forgot password" requests succeed without actually sending
+anything. Set all of these to enable real reset emails:
+
+- `SMTP_HOST`
+- `SMTP_PORT` (default 587)
+- `SMTP_USERNAME`
+- `SMTP_PASSWORD`
+- `SMTP_ENABLE_SSL` (default true)
+- `SMTP_FROM_ADDRESS`
+- `SMTP_FROM_NAME` (default "NeuroStrokeCare")
+- `FRONTEND_RESET_URL` — the public URL of the deployed frontend's
+  reset-password page (e.g. `https://your-domain.example/reset-password`),
+  not `localhost`
+
 ## Notes
 
 - The committed `appsettings.json` intentionally does not contain secrets.

@@ -128,6 +128,53 @@ namespace NeuroStrokeCare.api.Controllers
             return Ok(result);
         }
 
+        // POST: api/auth/register-request
+        // تسجيل ذاتي مفتوح لأي حد - الحساب بيتعمل بس مش موافق عليه (IsApproved = false) ومفيهوش
+        // أي Role، فمش هيقدر يسجل دخول لحد ما الأدمن يوافق عليه من صفحة الموافقات ويحدد دوره الفعلي.
+        [AllowAnonymous]
+        [HttpPost("register-request")]
+        public async Task<ActionResult<AuthResponse>> RegisterRequest([FromBody] SelfRegisterRequest request)
+        {
+            var result = await _authService.RegisterRequestAsync(request);
+            if (!result.Success)
+                return BadRequest(result);
+
+            return Ok(result);
+        }
+
+        // GET: api/auth/pending-users
+        [Authorize(Roles = "Admin")]
+        [HttpGet("pending-users")]
+        public async Task<ActionResult<List<PendingUserResponse>>> GetPendingUsers()
+        {
+            var users = await _authService.GetPendingUsersAsync();
+            return Ok(users);
+        }
+
+        // POST: api/auth/approve/{id}?role=Nurse
+        [Authorize(Roles = "Admin")]
+        [HttpPost("approve/{id:guid}")]
+        public async Task<ActionResult<AuthResponse>> ApproveUser(Guid id, [FromQuery] string role)
+        {
+            var result = await _authService.ApproveUserAsync(id, role);
+            if (!result.Success)
+                return BadRequest(result);
+
+            return Ok(result);
+        }
+
+        // POST: api/auth/reject/{id}
+        [Authorize(Roles = "Admin")]
+        [HttpPost("reject/{id:guid}")]
+        public async Task<ActionResult<AuthResponse>> RejectUser(Guid id)
+        {
+            var result = await _authService.RejectUserAsync(id);
+            if (!result.Success)
+                return BadRequest(result);
+
+            return Ok(result);
+        }
+
         #region Helpers
         private Guid? GetCurrentUserId()
         {

@@ -46,6 +46,10 @@ export interface AdmissionResponse {
   ctFindings: string | null
   mriFindings: string | null
   ctaFindings: string | null
+  thrombolysisGivenAt: string | null
+  thrombolysisDrug: string | null
+  thrombolysisDoseMg: number | null
+  thrombolysisRecordedById: string | null
 }
 
 export interface NIHSSAssessmentResponse {
@@ -113,6 +117,7 @@ export interface GUSSAssessmentResponse {
   admissionId: string
   assessedById: string
   assessedAt: string
+  indirectScore: number
   totalScore: number
   severity: number
 }
@@ -159,6 +164,36 @@ export interface UserSummaryResponse {
   phoneNumber: string | null
   role: string
   isRootSuperAdmin: boolean
+  createdAt: string
+}
+
+export interface PendingUserResponse {
+  id: string
+  userName: string
+  email: string
+  firstName: string
+  lastName: string
+  phoneNumber: string | null
+  requestedRole: string | null
+  createdAt: string
+}
+
+export interface AdmissionTimelineEntryResponse {
+  timestamp: string
+  statusLabel: string
+  status: number | null
+  changedById: string | null
+  minutesSincePrevious: number | null
+  minutesSinceArrival: number
+}
+
+export interface FollowUpNoteResponse {
+  id: string
+  admissionId: string
+  content: string
+  noteType: number // FollowUpNoteType: 1=General, 2=NewFinding
+  authorRole: string | null
+  createdBy: string
   createdAt: string
 }
 

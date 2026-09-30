@@ -4,6 +4,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using NeuroStrokeCare.Data.UserApplication;
 using NeuroStrokeCare.Service.Auth.Dtos;
+using NeuroStrokeCare.Service.Email;
+using System.Net;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -16,17 +18,20 @@ namespace NeuroStrokeCare.Service.Auth
         private readonly UserManager<ApplicationUser> _userManager;
         private readonly RoleManager<IdentityRole<Guid>> _roleManager;
         private readonly IConfiguration _configuration;
+        private readonly IEmailService _emailService;
         #endregion
 
         #region Constructor
         public AuthService(
             UserManager<ApplicationUser> userManager,
             RoleManager<IdentityRole<Guid>> roleManager,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            IEmailService emailService)
         {
             _userManager = userManager;
             _roleManager = roleManager;
             _configuration = configuration;
+            _emailService = emailService;
         }
         #endregion
 
@@ -45,7 +50,8 @@ namespace NeuroStrokeCare.Service.Auth
                 Email = request.Email,
                 FirstName = request.FirstName.Trim(),
                 LastName = request.LastName.Trim(),
-                PhoneNumber = request.PhoneNumber?.Trim()
+                PhoneNumber = request.PhoneNumber?.Trim(),
+                IsApproved = true
             };
 
             var createResult = await _userManager.CreateAsync(user, request.Password);
@@ -76,6 +82,9 @@ namespace NeuroStrokeCare.Service.Auth
 
             if (user == null || user.IsDeleted)
                 return new AuthResponse { Success = false, Message = "اسم المستخدم أو كلمة المرور غير صحيحة" };
+
+            if (!user.IsApproved)
+                return new AuthResponse { Success = false, Message = "الحساب لسه في انتظار موافقة الأدمن قبل ما تقدر تسجل دخول" };
 
             if (await _userManager.IsLockedOutAsync(user))
                 return new AuthResponse { Success = false, Message = "الحساب مقفول مؤقتًا بسبب محاولات دخول فاشلة متكررة، حاول لاحقًا" };
@@ -152,13 +161,25 @@ namespace NeuroStrokeCare.Service.Auth
 
             var token = await _userManager.GeneratePasswordResetTokenAsync(user);
 
-            // TODO: لسه معملناش خدمة إيميل - التوكن بيترجع هنا مؤقتًا عشان تقدر تختبر الفلو،
-            // لما نضيف IEmailService هنبعت التوكن بإيميل بدل ما يترجع في الـ Response
+            // رابط إعادة التعيين بيتبعت بإيميل فعلي دلوقتي (مش بيرجع في الـ Response تاني -
+            // ده كان مؤقت بس لحد ما نضيف IEmailService). Email:FrontendResetUrl مطلوب يتظبط
+            // في appsettings.json (أو Environment Variable) على رابط صفحة reset-password
+            // بتاعة الفرونت إند الفعلي بعد النشر.
+            var resetUrlBase = _configuration["Email:FrontendResetUrl"] ?? "http://localhost:5173/reset-password";
+            var resetLink = $"{resetUrlBase}?email={WebUtility.UrlEncode(user.Email)}&token={WebUtility.UrlEncode(token)}";
+
+            var body = $@"
+                <p>مرحبًا {WebUtility.HtmlEncode(user.FirstName)},</p>
+                <p>طلب إعادة تعيين كلمة المرور الخاصة بحسابك في NeuroStrokeCare. اضغط الرابط ده لتحديد كلمة مرور جديدة (صالح لفترة محدودة):</p>
+                <p><a href=""{resetLink}"">{resetLink}</a></p>
+                <p>لو أنت مطلبتش الطلب ده، تجاهل الإيميل ده ببساطة.</p>";
+
+            await _emailService.SendAsync(user.Email!, "إعادة تعيين كلمة المرور - NeuroStrokeCare", body);
+
             return new AuthResponse
             {
                 Success = true,
-                Message = "تم توليد رابط إعادة تعيين كلمة المرور (مؤقتًا هنا لحد ما نضيف خدمة الإيميل)",
-                ResetToken = token
+                Message = "لو الإيميل ده مسجل عندنا، هيوصله رابط إعادة تعيين كلمة المرور"
             };
         }
 
@@ -212,6 +233,104 @@ namespace NeuroStrokeCare.Service.Auth
             }
 
             return result;
+        }
+
+        public async Task<AuthResponse> RegisterRequestAsync(SelfRegisterRequest request)
+        {
+            if (await _userManager.FindByEmailAsync(request.Email) != null)
+                return new AuthResponse { Success = false, Message = "البريد الإلكتروني مستخدم بالفعل" };
+
+            if (await _userManager.FindByNameAsync(request.UserName) != null)
+                return new AuthResponse { Success = false, Message = "اسم المستخدم مستخدم بالفعل" };
+
+            var user = new ApplicationUser
+            {
+                UserName = request.UserName,
+                Email = request.Email,
+                FirstName = request.FirstName.Trim(),
+                LastName = request.LastName.Trim(),
+                PhoneNumber = request.PhoneNumber?.Trim(),
+                IsApproved = false,
+                RequestedRole = string.IsNullOrWhiteSpace(request.RequestedRole) ? null : request.RequestedRole.Trim()
+            };
+
+            var createResult = await _userManager.CreateAsync(user, request.Password);
+            if (!createResult.Succeeded)
+            {
+                return new AuthResponse
+                {
+                    Success = false,
+                    Message = "فشل إنشاء الطلب",
+                    Errors = createResult.Errors.Select(e => e.Description)
+                };
+            }
+
+            // من غير أي Role دلوقتي - هتتحدد لما الأدمن يوافق. من غير Token ولا SignIn -
+            // الحساب مش نشط لحد ما يتوافق عليه.
+            return new AuthResponse
+            {
+                Success = true,
+                Message = "تم إرسال طلب إنشاء الحساب - هيتفعّل بعد موافقة الأدمن"
+            };
+        }
+
+        public async Task<List<PendingUserResponse>> GetPendingUsersAsync()
+        {
+            var users = await _userManager.Users
+                .Where(u => !u.IsDeleted && !u.IsApproved)
+                .OrderBy(u => u.CreatedAt)
+                .ToListAsync();
+
+            return users.Select(u => new PendingUserResponse
+            {
+                Id = u.Id,
+                UserName = u.UserName ?? string.Empty,
+                Email = u.Email ?? string.Empty,
+                FirstName = u.FirstName,
+                LastName = u.LastName,
+                PhoneNumber = u.PhoneNumber,
+                RequestedRole = u.RequestedRole,
+                CreatedAt = u.CreatedAt
+            }).ToList();
+        }
+
+        public async Task<AuthResponse> ApproveUserAsync(Guid userId, string role)
+        {
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null || user.IsDeleted)
+                return new AuthResponse { Success = false, Message = "المستخدم غير موجود" };
+
+            if (string.IsNullOrWhiteSpace(role))
+                return new AuthResponse { Success = false, Message = "الدور مطلوب عشان توافق على الحساب" };
+
+            var trimmedRole = role.Trim();
+            if (!await _roleManager.RoleExistsAsync(trimmedRole))
+                await _roleManager.CreateAsync(new IdentityRole<Guid>(trimmedRole));
+
+            var existingRoles = await _userManager.GetRolesAsync(user);
+            if (existingRoles.Count > 0)
+                await _userManager.RemoveFromRolesAsync(user, existingRoles);
+
+            await _userManager.AddToRoleAsync(user, trimmedRole);
+
+            user.IsApproved = true;
+            await _userManager.UpdateAsync(user);
+
+            return new AuthResponse { Success = true, Message = "تم قبول الحساب وتفعيله" };
+        }
+
+        public async Task<AuthResponse> RejectUserAsync(Guid userId)
+        {
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null || user.IsDeleted)
+                return new AuthResponse { Success = false, Message = "المستخدم غير موجود" };
+
+            // مش بنحذف الحساب فعليًا (متسق مع سياسة الـ Soft Delete) - بس بنعطّله ونمنعه يدخل تاني
+            user.IsDeleted = true;
+            user.DeletedAt = DateTime.UtcNow;
+            await _userManager.UpdateAsync(user);
+
+            return new AuthResponse { Success = true, Message = "تم رفض الطلب" };
         }
 
         #endregion

@@ -1,21 +1,119 @@
+import { useState, type FormEvent } from 'react'
 import { motion } from 'framer-motion'
+import { useAuth } from '@/context/AuthContext'
 import { entityApi } from '@/lib/entityApi'
 import { useEntityList } from '@/hooks/useEntityList'
 import { useAdmissionContext } from '@/hooks/useAdmissionContext'
-import type { LabResultsResponse } from '@/types/entities'
+import type { LabResultsResponse, AdmissionResponse } from '@/types/entities'
 import DataTable, { type Column } from '@/components/DataTable'
-import PageHeader, { Card } from '@/components/PageHeader'
+import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
+import Modal from '@/components/Modal'
+import { Field, TextInput, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
+import { isDoctorRole, isNurseRole } from '@/lib/roles'
 
 const labResultsApi = entityApi<LabResultsResponse>('LabResults')
+const admissionsApi = entityApi<AdmissionResponse>('Admission')
 
 function value(v: number | null, unit = '') {
   return v === null || v === undefined ? '—' : `${v}${unit}`
 }
 
+const NUMERIC_FIELDS: { key: keyof typeof emptyForm; label: string; step?: string }[] = [
+  { key: 'glucoseMmol', label: 'Glucose (mmol/L)', step: '0.1' },
+  { key: 'inr', label: 'INR', step: '0.01' },
+  { key: 'pt', label: 'PT', step: '0.1' },
+  { key: 'platelets', label: 'Platelets', step: '1' },
+  { key: 'sodium', label: 'Sodium', step: '0.1' },
+  { key: 'potassium', label: 'Potassium', step: '0.1' },
+  { key: 'creatinine', label: 'Creatinine', step: '0.01' },
+  { key: 'hemoglobin', label: 'Hemoglobin', step: '0.1' },
+  { key: 'ldl', label: 'LDL', step: '0.1' },
+  { key: 'hbA1c', label: 'HbA1c', step: '0.1' },
+  { key: 'aPTT', label: 'aPTT', step: '0.1' },
+  { key: 'alt', label: 'ALT', step: '1' },
+  { key: 'ast', label: 'AST', step: '1' },
+]
+
+const emptyForm = {
+  admissionId: '',
+  recordedAt: '',
+  glucoseMmol: '',
+  inr: '',
+  pt: '',
+  platelets: '',
+  sodium: '',
+  potassium: '',
+  creatinine: '',
+  hemoglobin: '',
+  ldl: '',
+  hbA1c: '',
+  aPTT: '',
+  alt: '',
+  ast: '',
+  ecgAtrialFibrillation: '',
+}
+
 export default function LabResults() {
+  const { user } = useAuth()
   const { data, loading, error, reload } = useEntityList(() => labResultsApi.list())
   const { patientNameByAdmissionId, loading: contextLoading } = useAdmissionContext()
+  const admissions = useEntityList(() => admissionsApi.list())
+
+  const [modalOpen, setModalOpen] = useState(false)
+  const [form, setForm] = useState(emptyForm)
+  const [submitting, setSubmitting] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const canWrite = isDoctorRole(user?.role) || isNurseRole(user?.role)
+
+  function openNew() {
+    setForm(emptyForm)
+    setFormError(null)
+    setModalOpen(true)
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!user?.userId) return
+    setSubmitting(true)
+    setFormError(null)
+    try {
+      const num = (v: string) => (v === '' ? null : Number(v))
+      await labResultsApi.create(
+        {
+          admissionId: form.admissionId,
+          recordedAt: form.recordedAt,
+          glucoseMmol: num(form.glucoseMmol),
+          inr: num(form.inr),
+          pt: num(form.pt),
+          platelets: num(form.platelets),
+          sodium: num(form.sodium),
+          potassium: num(form.potassium),
+          creatinine: num(form.creatinine),
+          hemoglobin: num(form.hemoglobin),
+          ldl: num(form.ldl),
+          hbA1c: num(form.hbA1c),
+          aPTT: num(form.aPTT),
+          alt: num(form.alt),
+          ast: num(form.ast),
+          ecgAtrialFibrillation: form.ecgAtrialFibrillation === '' ? null : form.ecgAtrialFibrillation === 'true',
+        },
+        user.userId,
+      )
+      setModalOpen(false)
+      reload()
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status
+      setFormError(
+        status === 403
+          ? 'Only doctors or nursing staff can record lab results.'
+          : 'Could not save the lab result — check the admission and values entered.',
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const columns: Column<LabResultsResponse>[] = [
     { header: 'Patient', render: (r) => patientNameByAdmissionId.get(r.admissionId) ?? '—' },
@@ -59,7 +157,19 @@ export default function LabResults() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-6">
-      <PageHeader title="Lab Results" subtitle="Bloodwork and coagulation panels recorded per admission" />
+      <PageHeader
+        title="Lab Results"
+        subtitle="Bloodwork and coagulation panels recorded per admission"
+        action={
+          canWrite ? (
+            <PrimaryButton onClick={openNew} disabled={admissions.data.length === 0}>
+              + New lab result
+            </PrimaryButton>
+          ) : (
+            <span className="text-[12.5px] text-text-muted">Only doctors and nursing staff can record labs</span>
+          )
+        }
+      />
 
       <Card>
         <DataTable
@@ -72,6 +182,73 @@ export default function LabResults() {
           emptyMessage="No lab results recorded yet."
         />
       </Card>
+
+      <Modal open={modalOpen} title="New lab result" onClose={() => setModalOpen(false)}>
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
+          <Field label="Patient / admission">
+            <Select
+              required
+              value={form.admissionId}
+              onChange={(e) => setForm({ ...form, admissionId: e.target.value })}
+            >
+              <option value="" disabled>
+                Select an admission…
+              </option>
+              {admissions.data.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {patientNameByAdmissionId.get(a.id) ?? a.id.slice(0, 8)} —{' '}
+                  {new Date(a.admissionTime).toLocaleDateString()}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          <Field label="Recorded at">
+            <TextInput
+              type="datetime-local"
+              required
+              value={form.recordedAt}
+              onChange={(e) => setForm({ ...form, recordedAt: e.target.value })}
+            />
+          </Field>
+
+          <p className="text-[12px] text-text-muted">
+            Every value below is optional — leave anything not yet available blank.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {NUMERIC_FIELDS.map((f) => (
+              <Field key={f.key} label={f.label}>
+                <TextInput
+                  type="number"
+                  step={f.step}
+                  value={form[f.key]}
+                  onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                />
+              </Field>
+            ))}
+          </div>
+
+          <Field label="AFib on ECG">
+            <Select
+              value={form.ecgAtrialFibrillation}
+              onChange={(e) => setForm({ ...form, ecgAtrialFibrillation: e.target.value })}
+            >
+              <option value="">Not assessed</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
+            </Select>
+          </Field>
+
+          {formError && (
+            <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{formError}</p>
+          )}
+
+          <PrimaryButton type="submit" disabled={submitting}>
+            {submitting ? 'Saving…' : 'Save lab result'}
+          </PrimaryButton>
+        </form>
+      </Modal>
     </motion.div>
   )
 }

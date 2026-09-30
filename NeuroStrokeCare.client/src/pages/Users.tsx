@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { useAuth } from '@/context/AuthContext'
 import { useEntityList } from '@/hooks/useEntityList'
 import { usersApi } from '@/lib/usersApi'
-import type { UserSummaryResponse } from '@/types/entities'
+import type { UserSummaryResponse, PendingUserResponse } from '@/types/entities'
 import DataTable, { type Column } from '@/components/DataTable'
 import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
 import Modal from '@/components/Modal'
@@ -34,11 +34,39 @@ const emptyForm = {
 export default function Users() {
   const { user } = useAuth()
   const { data, loading, error, reload } = useEntityList(() => usersApi.list())
+  const pending = useEntityList(() => usersApi.listPending())
 
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+
+  const [approveTarget, setApproveTarget] = useState<PendingUserResponse | null>(null)
+  const [approveRole, setApproveRole] = useState('Resident')
+  const [approveBusy, setApproveBusy] = useState(false)
+  const [approveError, setApproveError] = useState<string | null>(null)
+
+  async function handleApprove(e: FormEvent) {
+    e.preventDefault()
+    if (!approveTarget) return
+    setApproveBusy(true)
+    setApproveError(null)
+    try {
+      await usersApi.approve(approveTarget.id, approveRole)
+      setApproveTarget(null)
+      pending.reload()
+      reload()
+    } catch {
+      setApproveError('Could not approve this account — try again.')
+    } finally {
+      setApproveBusy(false)
+    }
+  }
+
+  async function handleReject(p: PendingUserResponse) {
+    await usersApi.reject(p.id)
+    pending.reload()
+  }
 
   if (user?.role !== 'Admin') {
     return (
@@ -90,6 +118,56 @@ export default function Users() {
         action={<PrimaryButton onClick={() => setModalOpen(true)}>+ New account</PrimaryButton>}
       />
 
+      {pending.data.length > 0 && (
+        <Card className="flex flex-col gap-3 border-warning/40 bg-warning-bg/40">
+          <div>
+            <h2 className="text-[14px] font-semibold text-text">
+              Pending approval ({pending.data.length})
+            </h2>
+            <p className="text-[12.5px] text-text-secondary">
+              Self-registration requests — no one on this list can sign in yet.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2">
+            {pending.data.map((p) => (
+              <div
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border-subtle bg-surface px-3 py-2.5"
+              >
+                <div>
+                  <div className="text-[13.5px] font-semibold text-text">
+                    {p.firstName} {p.lastName} <span className="font-normal text-text-muted">({p.userName})</span>
+                  </div>
+                  <div className="text-[12px] text-text-secondary">
+                    {p.email} — requested {p.requestedRole ? roleLabel(p.requestedRole) : 'no role specified'}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setApproveRole(p.requestedRole ?? 'Resident')
+                      setApproveError(null)
+                      setApproveTarget(p)
+                    }}
+                    className="rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-semibold text-white hover:opacity-90"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleReject(p)}
+                    className="rounded-lg border border-border-subtle px-3 py-1.5 text-[12.5px] font-medium text-critical hover:bg-critical-bg"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card>
         <DataTable
           columns={columns}
@@ -101,6 +179,34 @@ export default function Users() {
           emptyMessage="No staff accounts yet."
         />
       </Card>
+
+      <Modal
+        open={approveTarget !== null}
+        title={`Approve ${approveTarget ? `${approveTarget.firstName} ${approveTarget.lastName}` : ''}`}
+        onClose={() => setApproveTarget(null)}
+      >
+        {approveTarget && (
+          <form onSubmit={handleApprove} className="flex flex-col gap-3.5">
+            <Field label="Assign role">
+              <Select value={approveRole} onChange={(e) => setApproveRole(e.target.value)}>
+                {ALL_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {approveError && (
+              <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">
+                {approveError}
+              </p>
+            )}
+            <PrimaryButton type="submit" disabled={approveBusy}>
+              {approveBusy ? 'Approving…' : 'Approve & activate account'}
+            </PrimaryButton>
+          </form>
+        )}
+      </Modal>
 
       <Modal open={modalOpen} title="New staff account" onClose={() => setModalOpen(false)}>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">

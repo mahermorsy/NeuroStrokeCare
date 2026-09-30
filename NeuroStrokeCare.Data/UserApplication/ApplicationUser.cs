@@ -14,5 +14,12 @@ namespace NeuroStrokeCare.Data.UserApplication
         // تعطيل الحساب بدل حذفه (متسق مع سياسة الـ Restrict على البيانات الطبية)
         public bool IsDeleted { get; set; } = false;
         public DateTime? DeletedAt { get; set; }
+
+        // Pending-approval self-registration workflow: accounts created by an Admin (or the
+        // dev seeder) are approved by default; accounts created through the public
+        // self-registration endpoint start unapproved and cannot log in until an Admin approves
+        // them and assigns a real role (RequestedRole is only what the applicant asked for).
+        public bool IsApproved { get; set; } = true;
+        public string? RequestedRole { get; set; }
     }
 }

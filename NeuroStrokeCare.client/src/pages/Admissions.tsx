@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { motion } from 'framer-motion'
+import { Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { entityApi } from '@/lib/entityApi'
 import { useEntityList } from '@/hooks/useEntityList'
@@ -9,9 +10,10 @@ import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
 import Modal from '@/components/Modal'
 import { Field, TextInput, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
-import { BED_STATUS, PATIENT_STATUS, PATIENT_STATUS_OPTIONS, STROKE_TYPE } from '@/lib/enums'
+import { BED_STATUS, PATIENT_STATUS, PATIENT_STATUS_OPTIONS, STROKE_TYPE, STROKE_TYPE_OPTIONS } from '@/lib/enums'
 import { isDoctorRole } from '@/lib/roles'
 import { transferAdmission } from '@/lib/admissionTransferApi'
+import { setAdmissionStrokeType } from '@/lib/admissionStrokeTypeApi'
 
 const admissionsApi = entityApi<AdmissionResponse>('Admission')
 const patientsApi = entityApi<PatientResponse>('Patient')
@@ -47,6 +49,11 @@ export default function Admissions() {
   const [transferForm, setTransferForm] = useState({ status: 1, changeBed: false, bedId: '' })
   const [transferSubmitting, setTransferSubmitting] = useState(false)
   const [transferError, setTransferError] = useState<string | null>(null)
+
+  const [strokeTarget, setStrokeTarget] = useState<AdmissionResponse | null>(null)
+  const [strokeValue, setStrokeValue] = useState(1)
+  const [strokeSubmitting, setStrokeSubmitting] = useState(false)
+  const [strokeError, setStrokeError] = useState<string | null>(null)
 
   const patientNameById = useMemo(
     () => new Map(patients.data.map((p) => [p.id, `${p.firstName} ${p.lastName}`])),
@@ -120,6 +127,33 @@ export default function Admissions() {
     }
   }
 
+  function openStrokeType(a: AdmissionResponse) {
+    setStrokeTarget(a)
+    setStrokeValue(a.strokeType ?? 1)
+    setStrokeError(null)
+  }
+
+  async function handleStrokeTypeSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!user?.userId || !strokeTarget) return
+    setStrokeSubmitting(true)
+    setStrokeError(null)
+    try {
+      await setAdmissionStrokeType(strokeTarget.id, user.userId, strokeValue)
+      setStrokeTarget(null)
+      admissions.reload()
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status
+      setStrokeError(
+        status === 403
+          ? 'Only doctors (Consultant/Registrar/Resident) can set the stroke type.'
+          : 'Could not save the stroke type — please try again.',
+      )
+    } finally {
+      setStrokeSubmitting(false)
+    }
+  }
+
   // beds selectable in the transfer modal: vacant ones, plus whichever bed the
   // patient is already in (so it stays visible even though its own status is Occupied)
   const availableBedsForTransfer = beds.data.filter(
@@ -139,7 +173,20 @@ export default function Admissions() {
     },
     {
       header: 'Stroke type',
-      render: (a) => (a.strokeType ? STROKE_TYPE[a.strokeType as keyof typeof STROKE_TYPE] : '—'),
+      render: (a) =>
+        canManage ? (
+          <button
+            type="button"
+            onClick={() => openStrokeType(a)}
+            className="rounded-md px-1.5 py-0.5 text-[12.5px] font-medium text-text-primary hover:bg-accent/10 hover:text-accent"
+          >
+            {a.strokeType ? STROKE_TYPE[a.strokeType as keyof typeof STROKE_TYPE] : 'Set stroke type…'}
+          </button>
+        ) : a.strokeType ? (
+          STROKE_TYPE[a.strokeType as keyof typeof STROKE_TYPE]
+        ) : (
+          '—'
+        ),
     },
     {
       header: 'Imaging',
@@ -151,16 +198,25 @@ export default function Admissions() {
     },
     {
       header: '',
-      render: (a) =>
-        canManage ? (
-          <button
-            type="button"
-            onClick={() => openTransfer(a)}
-            className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-accent hover:bg-accent/10"
+      render: (a) => (
+        <div className="flex flex-wrap gap-1.5">
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => openTransfer(a)}
+              className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-accent hover:bg-accent/10"
+            >
+              Transfer / update
+            </button>
+          )}
+          <Link
+            to={`/report/${a.id}`}
+            className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-text-secondary hover:bg-border-soft"
           >
-            Transfer / update
-          </button>
-        ) : null,
+            Report
+          </Link>
+        </div>
+      ),
     },
   ]
 
@@ -301,6 +357,32 @@ export default function Admissions() {
 
           <PrimaryButton type="submit" disabled={transferSubmitting}>
             {transferSubmitting ? 'Saving…' : 'Save'}
+          </PrimaryButton>
+        </form>
+      </Modal>
+
+      <Modal
+        open={strokeTarget !== null}
+        title={`Stroke type${strokeTarget ? ` — ${patientNameById.get(strokeTarget.patientId) ?? 'patient'}` : ''}`}
+        onClose={() => setStrokeTarget(null)}
+      >
+        <form onSubmit={handleStrokeTypeSubmit} className="flex flex-col gap-3.5">
+          <Field label="Stroke type">
+            <Select value={strokeValue} onChange={(e) => setStrokeValue(Number(e.target.value))}>
+              {STROKE_TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+
+          {strokeError && (
+            <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{strokeError}</p>
+          )}
+
+          <PrimaryButton type="submit" disabled={strokeSubmitting}>
+            {strokeSubmitting ? 'Saving…' : 'Save'}
           </PrimaryButton>
         </form>
       </Modal>

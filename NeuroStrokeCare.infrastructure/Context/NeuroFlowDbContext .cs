@@ -28,6 +28,7 @@ namespace NeuroStrokeCare.infrastructure.Context
         public DbSet<GUSSAssessment> GUSSAssessments => Set<GUSSAssessment>();
         public DbSet<MorseAssessment> MorseAssessments => Set<MorseAssessment>();
         public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+        public DbSet<NeuroStrokeCare.Data.Entities.FollowUpNote> FollowUpNotes => Set<NeuroStrokeCare.Data.Entities.FollowUpNote>();
 
         protected override void OnModelCreating(ModelBuilder builder)
         {

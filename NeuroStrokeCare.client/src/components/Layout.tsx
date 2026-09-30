@@ -5,12 +5,14 @@ import { useAuth } from '@/context/AuthContext'
 import type { ReactElement, SVGProps } from 'react'
 import {
   GridIcon,
+  AlertIcon,
   UserIcon,
   ClipboardPlusIcon,
   BedIcon,
   CheckSquareIcon,
   FlaskIcon,
   ClockIcon,
+  NoteIcon,
   UserCircleIcon,
   UsersIcon,
   MenuIcon,
@@ -27,12 +29,14 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: GridIcon, end: true },
+  { to: '/alerts', label: 'Alerts', icon: AlertIcon },
   { to: '/patients', label: 'Patients', icon: UserIcon },
   { to: '/admissions', label: 'Admissions', icon: ClipboardPlusIcon },
   { to: '/wards', label: 'Wards & Beds', icon: BedIcon },
   { to: '/assessments', label: 'Assessments', icon: CheckSquareIcon },
   { to: '/lab-results', label: 'Lab Results', icon: FlaskIcon },
   { to: '/door-timing', label: 'Door Timing', icon: ClockIcon },
+  { to: '/follow-up', label: 'Follow-up notes', icon: NoteIcon },
 ]
 
 const ADMIN_NAV_ITEMS: NavItem[] = [{ to: '/users', label: 'Staff', icon: UsersIcon }]
@@ -53,7 +57,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen w-full bg-bg">
       {/* Mobile / tablet top bar — hidden once the sidebar is always-on at lg */}
-      <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-surface px-4 py-3 lg:hidden">
+      <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-border bg-surface px-4 py-3 lg:hidden print:hidden">
         <button
           type="button"
           onClick={() => setSidebarOpen(true)}
@@ -89,7 +93,7 @@ export default function Layout() {
           that's always visible from `lg` up (desktop) — same nav, same look.
         */}
         <nav
-          className={`fixed inset-y-0 left-0 z-40 flex w-[264px] max-w-[80vw] flex-shrink-0 flex-col gap-7 overflow-y-auto bg-sidebar px-[18px] py-6 text-sidebar-text shadow-2xl transition-transform duration-300 ease-out lg:sticky lg:top-0 lg:z-0 lg:h-screen lg:w-[248px] lg:max-w-none lg:translate-x-0 lg:py-7 lg:shadow-none ${
+          className={`fixed inset-y-0 left-0 z-40 flex w-[264px] max-w-[80vw] flex-shrink-0 flex-col gap-7 overflow-y-auto bg-sidebar px-[18px] py-6 text-sidebar-text shadow-2xl transition-transform duration-300 ease-out print:hidden lg:sticky lg:top-0 lg:z-0 lg:h-screen lg:w-[248px] lg:max-w-none lg:translate-x-0 lg:py-7 lg:shadow-none ${
             sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
@@ -158,7 +162,7 @@ export default function Layout() {
           </div>
         </nav>
 
-        <main className="min-w-0 flex-grow px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-9 lg:pb-12">
+        <main className="min-w-0 flex-grow px-4 py-6 sm:px-6 sm:py-8 print:w-full print:p-0 lg:px-10 lg:py-9 lg:pb-12">
           <Outlet />
         </main>
       </div>

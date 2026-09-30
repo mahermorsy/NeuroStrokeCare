@@ -1,6 +1,8 @@
 using AutoMapper;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NeuroStrokeCare.Data.Constants;
 using NeuroStrokeCare.Core.Features.BaseService.Commands.Models;
 using NeuroStrokeCare.Core.Features.BaseService.Queries.Models;
 using NeuroStrokeCare.Core.Features.LabResults.Dtos;
@@ -104,6 +106,7 @@ namespace NeuroStrokeCare.api.Controllers
         }
 
         // POST: api/labresults?actingUserId=...
+        [Authorize(Roles = Roles.AnyClinical)]
         [HttpPost]
         public async Task<ActionResult<Guid>> Create(
             [FromBody] CreateLabResultsRequest request,
@@ -123,6 +126,7 @@ namespace NeuroStrokeCare.api.Controllers
         }
 
         // PUT: api/labresults?actingUserId=...
+        [Authorize(Roles = Roles.AnyClinical)]
         [HttpPut]
         public async Task<IActionResult> Update(
             [FromBody] UpdateLabResultsRequest request,
@@ -142,6 +146,7 @@ namespace NeuroStrokeCare.api.Controllers
         }
 
         // PATCH: api/labresults/{id}/status?actingUserId=...&status=1
+        [Authorize(Roles = Roles.AnyClinical)]
         [HttpPatch("{id:guid}/status")]
         public async Task<IActionResult> ChangeStatus(
             Guid id,

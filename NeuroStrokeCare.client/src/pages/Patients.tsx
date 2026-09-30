@@ -3,14 +3,18 @@ import { motion } from 'framer-motion'
 import { useAuth } from '@/context/AuthContext'
 import { entityApi } from '@/lib/entityApi'
 import { useEntityList } from '@/hooks/useEntityList'
-import type { PatientResponse } from '@/types/entities'
+import type { PatientResponse, AdmissionResponse } from '@/types/entities'
 import DataTable, { type Column } from '@/components/DataTable'
 import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
 import Modal from '@/components/Modal'
 import { Field, TextInput, Select, TextArea } from '@/components/FormField'
 import { GENDER_OPTIONS } from '@/lib/enums'
+import { calculateThrombolyticDose, type ThrombolyticDrug } from '@/lib/doseCalculator'
+import { recordThrombolysis } from '@/lib/admissionThrombolysisApi'
+import { isDoctorRole } from '@/lib/roles'
 
 const patientsApi = entityApi<PatientResponse>('Patient')
+const admissionsApi = entityApi<AdmissionResponse>('Admission')
 
 function age(dateOfBirth: string) {
   const dob = new Date(dateOfBirth)
@@ -38,6 +42,37 @@ export default function Patients() {
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [doseTarget, setDoseTarget] = useState<PatientResponse | null>(null)
+  const [doseDrug, setDoseDrug] = useState<ThrombolyticDrug>('Alteplase')
+  const admissions = useEntityList(() => admissionsApi.list())
+  const [recordBusy, setRecordBusy] = useState(false)
+  const [recordMessage, setRecordMessage] = useState<string | null>(null)
+
+  function activeAdmissionFor(patientId: string) {
+    return admissions.data
+      .filter((a) => a.patientId === patientId && !a.dischargeTime)
+      .sort((a, b) => new Date(b.admissionTime).getTime() - new Date(a.admissionTime).getTime())[0]
+  }
+
+  async function handleRecordThrombolysis() {
+    if (!doseTarget || !user?.userId || !dose) return
+    const admission = activeAdmissionFor(doseTarget.id)
+    if (!admission) {
+      setRecordMessage('No active admission found for this patient — record it from the Admissions page instead.')
+      return
+    }
+    setRecordBusy(true)
+    setRecordMessage(null)
+    try {
+      await recordThrombolysis(admission.id, user.userId, doseDrug, dose.totalDoseMg)
+      setRecordMessage('Recorded — the 24h antithrombotic lockout now applies to this admission.')
+      admissions.reload()
+    } catch {
+      setRecordMessage('Could not record this — try again.')
+    } finally {
+      setRecordBusy(false)
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -89,7 +124,25 @@ export default function Patients() {
     { header: 'Gender', render: (p) => p.gender },
     { header: 'Weight (kg)', render: (p) => p.weightKg },
     { header: 'Chief Complaint', render: (p) => <span className="text-text-secondary">{p.chiefComplaint}</span> },
+    {
+      header: '',
+      render: (p) => (
+        <button
+          type="button"
+          onClick={() => {
+            setDoseDrug('Alteplase')
+            setRecordMessage(null)
+            setDoseTarget(p)
+          }}
+          className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-accent hover:bg-accent/10"
+        >
+          Thrombolytic dose
+        </button>
+      ),
+    },
   ]
+
+  const dose = doseTarget ? calculateThrombolyticDose(doseTarget.weightKg, doseDrug) : null
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-6">
@@ -195,6 +248,79 @@ export default function Patients() {
             {submitting ? 'Saving…' : 'Save patient'}
           </PrimaryButton>
         </form>
+      </Modal>
+
+      <Modal
+        open={doseTarget !== null}
+        title={`Thrombolytic dose${doseTarget ? ` — ${doseTarget.firstName} ${doseTarget.lastName}` : ''}`}
+        onClose={() => setDoseTarget(null)}
+      >
+        {doseTarget && dose && (
+          <div className="flex flex-col gap-3.5">
+            <Field label="Drug">
+              <Select value={doseDrug} onChange={(e) => setDoseDrug(e.target.value as ThrombolyticDrug)}>
+                <option value="Alteplase">Alteplase (Actilyse) — 0.9 mg/kg, max 90 mg</option>
+                <option value="Tenecteplase">Tenecteplase (Metalyse) — 0.25 mg/kg, max 25 mg</option>
+              </Select>
+            </Field>
+
+            <p className="text-[13px] text-text-secondary">{dose.administration}</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg border border-border-subtle px-3 py-2.5">
+                <div className="text-[11.5px] font-medium text-text-muted">Weight</div>
+                <div className="text-[16px] font-semibold text-text">{doseTarget.weightKg} kg</div>
+              </div>
+              <div className="rounded-lg border border-border-subtle px-3 py-2.5">
+                <div className="text-[11.5px] font-medium text-text-muted">Total dose</div>
+                <div className="text-[16px] font-semibold text-text">
+                  {dose.totalDoseMg} mg
+                  {dose.cappedByMax && (
+                    <span className="ml-1 text-[11px] text-warning">
+                      (capped at {doseDrug === 'Alteplase' ? '90' : '25'} mg)
+                    </span>
+                  )}
+                </div>
+              </div>
+              {doseDrug === 'Alteplase' ? (
+                <>
+                  <div className="rounded-lg border border-border-subtle px-3 py-2.5">
+                    <div className="text-[11.5px] font-medium text-text-muted">Bolus (10%, IV over 1 min)</div>
+                    <div className="text-[16px] font-semibold text-text">{dose.bolusMg} mg</div>
+                  </div>
+                  <div className="rounded-lg border border-border-subtle px-3 py-2.5">
+                    <div className="text-[11.5px] font-medium text-text-muted">Infusion (90%, over 60 min)</div>
+                    <div className="text-[16px] font-semibold text-text">
+                      {dose.infusionMg} mg (~{dose.infusionRateMgPerHour} mg/hr)
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-lg border border-border-subtle px-3 py-2.5 col-span-2">
+                  <div className="text-[11.5px] font-medium text-text-muted">Bolus (single dose)</div>
+                  <div className="text-[16px] font-semibold text-text">{dose.bolusMg} mg — over 5–10 seconds</div>
+                </div>
+              )}
+            </div>
+
+            <p className="rounded-lg bg-warning-bg px-3 py-2 text-[12.5px] font-medium text-warning">
+              Calculated value only — the treating clinician must verify this against the patient's chart and
+              contraindications before administration.
+            </p>
+
+            {isDoctorRole(user?.role) && (
+              <button
+                type="button"
+                onClick={handleRecordThrombolysis}
+                disabled={recordBusy}
+                className="rounded-lg border border-accent px-3.5 py-2 text-[13px] font-semibold text-accent transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                {recordBusy ? 'Recording…' : 'Record as given now (starts the 24h lockout)'}
+              </button>
+            )}
+            {recordMessage && <p className="text-[12.5px] text-text-secondary">{recordMessage}</p>}
+          </div>
+        )}
       </Modal>
     </motion.div>
   )
