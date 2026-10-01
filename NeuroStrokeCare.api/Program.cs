@@ -1,13 +1,12 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 using NeuroStrokeCare.api.OpenApi;
 using NeuroStrokeCare.Core;
-using NeuroStrokeCare.Data;
+using NeuroStrokeCare.Data.UserApplication;
 using NeuroStrokeCare.infrastructure;
-using NeuroStrokeCare.infrastructure.Context;
 using NeuroStrokeCare.Service;
 using Scalar.AspNetCore;
 using System.Text;
@@ -68,14 +67,66 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
-    // واجهة اختبار احترافية على /scalar/v1 - فيها زرار Authorize عشان تحط الـ JWT Token
     app.MapScalarApiReference();
 
-    // بيانات تجريبية (admin/doctor) عشان تقدر تسجل دخول من الواجهة وانت بتبنيها -
-    // شغالة في Development بس، شوف NeuroStrokeCare.infrastructure/DataSeeder.cs
     using (var seedScope = app.Services.CreateScope())
     {
         await NeuroStrokeCare.infrastructure.DataSeeder.SeedAsync(seedScope.ServiceProvider);
+    }
+}
+
+
+// Production Admin Bootstrap
+if (app.Environment.IsProduction())
+{
+    using var scope = app.Services.CreateScope();
+
+    var userManager = scope.ServiceProvider
+        .GetRequiredService<UserManager<ApplicationUser>>();
+
+    var roleManager = scope.ServiceProvider
+        .GetRequiredService<RoleManager<IdentityRole<Guid>>>();
+
+    var configuration = scope.ServiceProvider
+        .GetRequiredService<IConfiguration>();
+
+    const string adminRole = "Admin";
+    const string adminUserName = "admin";
+    const string adminEmail = "admin@neurostrokecare.local";
+
+    if (!await roleManager.RoleExistsAsync(adminRole))
+    {
+        await roleManager.CreateAsync(
+            new IdentityRole<Guid>(adminRole)
+        );
+    }
+
+    var admin = await userManager.FindByNameAsync(adminUserName);
+
+    if (admin == null)
+    {
+        var password = configuration["SeedUsers:DefaultPassword"];
+
+        if (!string.IsNullOrWhiteSpace(password))
+        {
+            admin = new ApplicationUser
+            {
+                UserName = adminUserName,
+                Email = adminEmail,
+                EmailConfirmed = true,
+                FirstName = "System",
+                LastName = "Admin",
+                IsApproved = true,
+                IsRootSuperAdmin = true
+            };
+
+            var result = await userManager.CreateAsync(admin, password);
+
+            if (result.Succeeded)
+            {
+                await userManager.AddToRoleAsync(admin, adminRole);
+            }
+        }
     }
 }
 
