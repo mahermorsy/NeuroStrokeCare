@@ -151,6 +151,17 @@ app.UseExceptionHandler(errorApp =>
 
 app.UseHttpsRedirection();
 
+// Serves uploaded staff photos from a dedicated folder outside wwwroot (not from the
+// published app's own files), so it survives redeploys and maps cleanly to a single
+// Docker volume (see docker-compose.*.yml: neurostroke_uploads -> /app/App_Data/uploads).
+var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "App_Data", "uploads");
+Directory.CreateDirectory(Path.Combine(uploadsPath, "staff-photos"));
+app.UseStaticFiles(new Microsoft.AspNetCore.Builder.StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadsPath),
+    RequestPath = "/uploads"
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 

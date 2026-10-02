@@ -32,5 +32,8 @@ namespace NeuroStrokeCare.Service.Auth.Dtos
 
         // اختياري - لو متبعتش هيتحط "Staff" افتراضيًا
         public string? Role { get; set; }
+
+        // رقم الكارنيه/الموظف - بيحدده الأدمن وقت إنشاء الحساب (اختياري، ممكن يتحدد بعدين)
+        public string? EmployeeId { get; set; }
     }
 }

@@ -10,6 +10,7 @@ import Modal from '@/components/Modal'
 import { Field, TextInput, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
 import { ALL_ROLES, ROLE_LABELS, roleLabel } from '@/lib/roles'
+import { describeApiError } from '@/lib/apiError'
 
 const ROLE_TONE: Record<string, 'critical' | 'info' | 'success' | 'neutral'> = {
   Admin: 'critical',
@@ -29,6 +30,7 @@ const emptyForm = {
   confirmPassword: '',
   phoneNumber: '',
   role: 'Staff',
+  employeeId: '',
 }
 
 export default function Users() {
@@ -43,8 +45,23 @@ export default function Users() {
 
   const [approveTarget, setApproveTarget] = useState<PendingUserResponse | null>(null)
   const [approveRole, setApproveRole] = useState('Resident')
+  const [approveEmployeeId, setApproveEmployeeId] = useState('')
   const [approveBusy, setApproveBusy] = useState(false)
   const [approveError, setApproveError] = useState<string | null>(null)
+
+  const [editTarget, setEditTarget] = useState<UserSummaryResponse | null>(null)
+  const [editRole, setEditRole] = useState('Resident')
+  const [editEmployeeId, setEditEmployeeId] = useState('')
+  const [editBusy, setEditBusy] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  // Phase F1 - Frontend Hardening (Section 16/17): Reject previously had no confirmation step,
+  // no busy state, and no error handling at all - a double-click could fire two concurrent
+  // reject calls, and any failure left the row silently stuck in the pending list with zero
+  // feedback. Routed through a confirmation modal mirroring the existing Approve/Edit pattern.
+  const [rejectTarget, setRejectTarget] = useState<PendingUserResponse | null>(null)
+  const [rejectBusy, setRejectBusy] = useState(false)
+  const [rejectError, setRejectError] = useState<string | null>(null)
 
   async function handleApprove(e: FormEvent) {
     e.preventDefault()
@@ -52,20 +69,46 @@ export default function Users() {
     setApproveBusy(true)
     setApproveError(null)
     try {
-      await usersApi.approve(approveTarget.id, approveRole)
+      await usersApi.approve(approveTarget.id, approveRole, approveEmployeeId || undefined)
       setApproveTarget(null)
       pending.reload()
       reload()
-    } catch {
-      setApproveError('Could not approve this account — try again.')
+    } catch (err) {
+      setApproveError(describeApiError(err, { 400: 'Could not approve this account — try again.' }))
     } finally {
       setApproveBusy(false)
     }
   }
 
-  async function handleReject(p: PendingUserResponse) {
-    await usersApi.reject(p.id)
-    pending.reload()
+  async function handleReject() {
+    if (!rejectTarget) return
+    setRejectBusy(true)
+    setRejectError(null)
+    try {
+      await usersApi.reject(rejectTarget.id)
+      setRejectTarget(null)
+      pending.reload()
+    } catch (err) {
+      setRejectError(describeApiError(err, { 400: 'Could not reject this request — try again.' }))
+    } finally {
+      setRejectBusy(false)
+    }
+  }
+
+  async function handleEdit(e: FormEvent) {
+    e.preventDefault()
+    if (!editTarget) return
+    setEditBusy(true)
+    setEditError(null)
+    try {
+      await usersApi.updateAdmin(editTarget.id, { role: editRole, employeeId: editEmployeeId })
+      setEditTarget(null)
+      reload()
+    } catch (err) {
+      setEditError(describeApiError(err, { 400: 'Could not update this account — try again.' }))
+    } finally {
+      setEditBusy(false)
+    }
   }
 
   if (user?.role !== 'Admin') {
@@ -91,11 +134,11 @@ export default function Users() {
       setForm(emptyForm)
       reload()
     } catch (err) {
-      const message = (err as { response?: { data?: { errors?: string[]; message?: string } } })?.response?.data
       setFormError(
-        (Array.isArray(message?.errors) && message.errors.join(', ')) ||
-          message?.message ||
-          'Could not create the account — check the fields and try again.',
+        describeApiError(err, {
+          400: 'Could not create the account — check the fields and try again.',
+          409: 'An account with this username or email already exists.',
+        }),
       )
     } finally {
       setSubmitting(false)
@@ -103,11 +146,42 @@ export default function Users() {
   }
 
   const columns: Column<UserSummaryResponse>[] = [
-    { header: 'Name', render: (u) => `${u.firstName} ${u.lastName}` },
+    {
+      header: 'Name',
+      render: (u) => (
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent/10 text-[11px] font-semibold text-accent">
+            {u.profilePhotoUrl ? (
+              <img src={u.profilePhotoUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              `${u.firstName[0] ?? ''}${u.lastName[0] ?? ''}`
+            )}
+          </span>
+          {u.firstName} {u.lastName}
+        </div>
+      ),
+    },
     { header: 'Username', render: (u) => u.userName },
     { header: 'Email', render: (u) => <span className="text-text-secondary">{u.email}</span> },
-    { header: 'Phone', render: (u) => u.phoneNumber ?? '—' },
+    { header: 'Employee ID', render: (u) => u.employeeId ?? <span className="text-text-muted">—</span> },
     { header: 'Role', render: (u) => <StatusPill label={roleLabel(u.role)} tone={ROLE_TONE[u.role] ?? 'neutral'} /> },
+    {
+      header: '',
+      render: (u) => (
+        <button
+          type="button"
+          onClick={() => {
+            setEditRole(u.role)
+            setEditEmployeeId(u.employeeId ?? '')
+            setEditError(null)
+            setEditTarget(u)
+          }}
+          className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-accent hover:bg-accent/10"
+        >
+          Edit
+        </button>
+      ),
+    },
   ]
 
   return (
@@ -117,6 +191,21 @@ export default function Users() {
         subtitle={`${data.length} account${data.length === 1 ? '' : 's'} can sign in`}
         action={<PrimaryButton onClick={() => setModalOpen(true)}>+ New account</PrimaryButton>}
       />
+
+      {pending.error && (
+        <Card className="flex flex-col gap-2 border-critical/40">
+          <p className="text-[13px] font-medium text-critical">
+            Could not load pending registration requests — {pending.error}
+          </p>
+          <button
+            type="button"
+            onClick={pending.reload}
+            className="self-start rounded-lg border border-border-subtle px-3 py-1.5 text-[12.5px] font-medium text-accent hover:bg-accent/10"
+          >
+            Retry
+          </button>
+        </Card>
+      )}
 
       {pending.data.length > 0 && (
         <Card className="flex flex-col gap-3 border-warning/40 bg-warning-bg/40">
@@ -147,6 +236,7 @@ export default function Users() {
                     type="button"
                     onClick={() => {
                       setApproveRole(p.requestedRole ?? 'Resident')
+                      setApproveEmployeeId('')
                       setApproveError(null)
                       setApproveTarget(p)
                     }}
@@ -156,7 +246,10 @@ export default function Users() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleReject(p)}
+                    onClick={() => {
+                      setRejectError(null)
+                      setRejectTarget(p)
+                    }}
                     className="rounded-lg border border-border-subtle px-3 py-1.5 text-[12.5px] font-medium text-critical hover:bg-critical-bg"
                   >
                     Reject
@@ -196,6 +289,9 @@ export default function Users() {
                 ))}
               </Select>
             </Field>
+            <Field label="Employee ID (optional, can set later)">
+              <TextInput value={approveEmployeeId} onChange={(e) => setApproveEmployeeId(e.target.value)} />
+            </Field>
             {approveError && (
               <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">
                 {approveError}
@@ -203,6 +299,76 @@ export default function Users() {
             )}
             <PrimaryButton type="submit" disabled={approveBusy}>
               {approveBusy ? 'Approving…' : 'Approve & activate account'}
+            </PrimaryButton>
+          </form>
+        )}
+      </Modal>
+
+      <Modal
+        open={rejectTarget !== null}
+        title={`Reject ${rejectTarget ? `${rejectTarget.firstName} ${rejectTarget.lastName}` : ''}`}
+        onClose={() => setRejectTarget(null)}
+      >
+        {rejectTarget && (
+          <div className="flex flex-col gap-3.5">
+            <p className="text-[13.5px] text-text-secondary">
+              This permanently rejects the registration request from{' '}
+              <span className="font-semibold text-text">
+                {rejectTarget.firstName} {rejectTarget.lastName}
+              </span>{' '}
+              ({rejectTarget.userName}). They will need to submit a new request to be considered again.
+            </p>
+            {rejectError && (
+              <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">
+                {rejectError}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setRejectTarget(null)}
+                disabled={rejectBusy}
+                className="rounded-lg border border-border-subtle px-3.5 py-2 text-[13px] font-medium text-text-secondary hover:bg-border-soft disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleReject}
+                disabled={rejectBusy}
+                className="rounded-lg bg-critical px-3.5 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                {rejectBusy ? 'Rejecting…' : 'Reject request'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={editTarget !== null}
+        title={`Edit ${editTarget ? `${editTarget.firstName} ${editTarget.lastName}` : ''}`}
+        onClose={() => setEditTarget(null)}
+      >
+        {editTarget && (
+          <form onSubmit={handleEdit} className="flex flex-col gap-3.5">
+            <Field label="Role">
+              <Select value={editRole} onChange={(e) => setEditRole(e.target.value)}>
+                {ALL_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Employee ID">
+              <TextInput value={editEmployeeId} onChange={(e) => setEditEmployeeId(e.target.value)} />
+            </Field>
+            {editError && (
+              <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{editError}</p>
+            )}
+            <PrimaryButton type="submit" disabled={editBusy}>
+              {editBusy ? 'Saving…' : 'Save changes'}
             </PrimaryButton>
           </form>
         )}
@@ -273,12 +439,20 @@ export default function Users() {
               />
             </Field>
           </div>
-          <Field label="Phone (optional)">
-            <TextInput
-              value={form.phoneNumber}
-              onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
-            />
-          </Field>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Phone (optional)">
+              <TextInput
+                value={form.phoneNumber}
+                onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })}
+              />
+            </Field>
+            <Field label="Employee ID (optional)">
+              <TextInput
+                value={form.employeeId}
+                onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+              />
+            </Field>
+          </div>
 
           {formError && (
             <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{formError}</p>

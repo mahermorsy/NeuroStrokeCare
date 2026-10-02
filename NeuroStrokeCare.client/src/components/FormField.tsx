@@ -3,10 +3,27 @@ import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTML
 const fieldClass =
   'rounded-lg border border-border px-3 py-2 text-[13.5px] text-text outline-none focus:border-accent'
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({
+  label,
+  children,
+  required,
+}: {
+  label: string
+  children: ReactNode
+  /** Shows a small, non-color-only "required" marker next to the label. Optional — omitting it
+   *  keeps every existing call site exactly as it rendered before. */
+  required?: boolean
+}) {
   return (
     <label className="flex flex-col gap-1.5 text-[13px] font-medium text-text-secondary">
-      {label}
+      <span>
+        {label}
+        {required && (
+          <span className="ml-1 text-critical" aria-hidden="true">
+            *
+          </span>
+        )}
+      </span>
       {children}
     </label>
   )

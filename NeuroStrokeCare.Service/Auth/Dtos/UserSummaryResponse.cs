@@ -11,5 +11,7 @@ namespace NeuroStrokeCare.Service.Auth.Dtos
         public string Role { get; set; } = string.Empty;
         public bool IsRootSuperAdmin { get; set; }
         public DateTime CreatedAt { get; set; }
+        public string? EmployeeId { get; set; }
+        public string? ProfilePhotoUrl { get; set; }
     }
 }

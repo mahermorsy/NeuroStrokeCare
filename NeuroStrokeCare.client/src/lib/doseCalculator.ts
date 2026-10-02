@@ -64,3 +64,58 @@ export function calculateThrombolyticDose(weightKg: number, drug: ThrombolyticDr
 function round1(n: number) {
   return Math.round(n * 10) / 10
 }
+
+// Weight-based status epilepticus dosing. Mirrors the thrombolytic calculator
+// above — this is a bedside reference, not a prescription; every result must
+// still be checked by the treating clinician before administration.
+//
+//  Lorazepam (first-line benzodiazepine): 0.1 mg/kg, capped at 4 mg — IV push
+//  over 2 minutes. May repeat once after 5–10 minutes if seizures continue.
+//
+//  Phenytoin (second-line, after a benzodiazepine): 20 mg/kg loading dose,
+//  capped at 1500 mg — IV infusion, max rate 50 mg/min (slow to 25 mg/min in
+//  the elderly or in cardiac disease). Requires cardiac/BP monitoring during
+//  the infusion.
+
+export type SeizureDrug = 'Lorazepam' | 'Phenytoin'
+
+export interface SeizureDose {
+  drug: SeizureDrug
+  totalDoseMg: number
+  cappedByMax: boolean
+  maxRateNote: string
+  administration: string
+  repeatNote: string | null
+}
+
+const SEIZURE_PROTOCOLS: Record<SeizureDrug, { mgPerKg: number; maxTotalMg: number }> = {
+  Lorazepam: { mgPerKg: 0.1, maxTotalMg: 4 },
+  Phenytoin: { mgPerKg: 20, maxTotalMg: 1500 },
+}
+
+export function calculateSeizureDose(weightKg: number, drug: SeizureDrug): SeizureDose {
+  const { mgPerKg, maxTotalMg } = SEIZURE_PROTOCOLS[drug]
+  const rawDose = weightKg * mgPerKg
+  const totalDoseMg = Math.min(rawDose, maxTotalMg)
+  const cappedByMax = rawDose > maxTotalMg
+
+  if (drug === 'Lorazepam') {
+    return {
+      drug,
+      totalDoseMg: round1(totalDoseMg),
+      cappedByMax,
+      maxRateNote: 'Max rate 2 mg/min',
+      administration: 'IV push over 2 minutes.',
+      repeatNote: 'May repeat once after 5–10 minutes if seizures continue.',
+    }
+  }
+
+  return {
+    drug,
+    totalDoseMg: round1(totalDoseMg),
+    cappedByMax,
+    maxRateNote: 'Max infusion rate 50 mg/min (use 25 mg/min in elderly or cardiac disease)',
+    administration: 'IV infusion, diluted in saline. Monitor ECG and blood pressure throughout the infusion.',
+    repeatNote: null,
+  }
+}

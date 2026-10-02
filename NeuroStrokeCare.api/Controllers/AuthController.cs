@@ -12,12 +12,14 @@ namespace NeuroStrokeCare.api.Controllers
     {
         #region Fields
         private readonly IAuthService _authService;
+        private readonly IWebHostEnvironment _env;
         #endregion
 
         #region Constructor
-        public AuthController(IAuthService authService)
+        public AuthController(IAuthService authService, IWebHostEnvironment env)
         {
             _authService = authService;
+            _env = env;
         }
         #endregion
 
@@ -151,16 +153,91 @@ namespace NeuroStrokeCare.api.Controllers
             return Ok(users);
         }
 
-        // POST: api/auth/approve/{id}?role=Nurse
+        // POST: api/auth/approve/{id}?role=Nurse&employeeId=12345
         [Authorize(Roles = "Admin")]
         [HttpPost("approve/{id:guid}")]
-        public async Task<ActionResult<AuthResponse>> ApproveUser(Guid id, [FromQuery] string role)
+        public async Task<ActionResult<AuthResponse>> ApproveUser(Guid id, [FromQuery] string role, [FromQuery] string? employeeId = null)
         {
-            var result = await _authService.ApproveUserAsync(id, role);
+            var result = await _authService.ApproveUserAsync(id, role, employeeId);
             if (!result.Success)
                 return BadRequest(result);
 
             return Ok(result);
+        }
+
+        // GET: api/auth/profile — الحساب بتاع الشخص المسجل دخول نفسه، بتفاصيل أكتر من /me
+        // (بما فيها رقم الكارنيه والصورة) عشان كارت الهوية.
+        [Authorize]
+        [HttpGet("profile")]
+        public async Task<ActionResult<UserSummaryResponse>> GetMyProfile()
+        {
+            var userId = GetCurrentUserId();
+            if (userId == null)
+                return Unauthorized();
+
+            var profile = await _authService.GetMyProfileAsync(userId.Value);
+            if (profile == null)
+                return NotFound();
+
+            return Ok(profile);
+        }
+
+        // PUT: api/auth/users/{id} — الأدمن بس يعدّل رقم الكارنيه و/أو دور موظف موجود بالفعل
+        [Authorize(Roles = "Admin")]
+        [HttpPut("users/{id:guid}")]
+        public async Task<ActionResult<AuthResponse>> UpdateUserAdmin(Guid id, [FromBody] UpdateUserAdminRequest request)
+        {
+            var result = await _authService.UpdateUserAdminAsync(id, request.Role, request.EmployeeId);
+            if (!result.Success)
+                return BadRequest(result);
+
+            return Ok(result);
+        }
+
+        // POST: api/auth/upload-photo — كل مستخدم بيرفع صورته الشخصية بنفسه (مش الأدمن نيابة عنه)،
+        // بتتخزن على السيرفر نفسه تحت App_Data/uploads/staff-photos (مش جوه wwwroot عشان تبقى
+        // منفصلة ويسهل عمل Docker volume ليها - شايفه في docker-compose.*.yml).
+        [Authorize]
+        [HttpPost("upload-photo")]
+        [RequestSizeLimit(5 * 1024 * 1024)]
+        public async Task<ActionResult<AuthResponse>> UploadPhoto(IFormFile file)
+        {
+            var userId = GetCurrentUserId();
+            if (userId == null)
+                return Unauthorized();
+
+            if (file == null || file.Length == 0)
+                return BadRequest(new AuthResponse { Success = false, Message = "اختر صورة أولًا" });
+
+            var allowedTypes = new[] { "image/jpeg", "image/png", "image/webp" };
+            if (!allowedTypes.Contains(file.ContentType))
+                return BadRequest(new AuthResponse { Success = false, Message = "الصورة لازم تكون JPG أو PNG أو WEBP" });
+
+            var ext = file.ContentType switch
+            {
+                "image/png" => ".png",
+                "image/webp" => ".webp",
+                _ => ".jpg"
+            };
+
+            var uploadsDir = Path.Combine(_env.ContentRootPath, "App_Data", "uploads", "staff-photos");
+            Directory.CreateDirectory(uploadsDir);
+
+            // اسم ثابت بمعرّف المستخدم عشان أي صورة جديدة تستبدل القديمة تلقائيًا بدل ما تتراكم ملفات يتيمة
+            var fileName = $"{userId.Value}{ext}";
+            var filePath = Path.Combine(uploadsDir, fileName);
+
+            await using (var stream = new FileStream(filePath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream);
+            }
+
+            var photoUrl = $"/uploads/staff-photos/{fileName}";
+            var result = await _authService.SetProfilePhotoAsync(userId.Value, photoUrl);
+            if (!result.Success)
+                return BadRequest(result);
+
+            return Ok(new { result.Success, result.Message, photoUrl });
         }
 
         // POST: api/auth/reject/{id}

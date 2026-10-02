@@ -112,6 +112,17 @@ namespace NeuroStrokeCare.infrastructure.Context
             builder.Entity<Ward>().HasIndex(w => w.Code).IsUnique();
             builder.Entity<Bed>().HasIndex(b => b.BedNumber).IsUnique();
 
+            // مريض واحد مينفعش يكون عنده أكتر من إدخال "مفتوح" (نشط + لسه متخرّجش) في نفس
+            // الوقت - ده الحارس الحقيقي على مستوى قاعدة البيانات نفسها (شبكة أمان أخيرة ضد أي
+            // Race Condition)، فحص AnyAsync في AdmissionController.Create ده بس لرسالة أوضح
+            // للمستخدم العادي. الفهرس ده بيستبدل الفهرس العادي (غير الفريد) اللي EF Core كان
+            // عامله تلقائيًا على PatientId (كـ Foreign Key) - لسه بيصلح لنفس الغرض (فهرسة
+            // البحث بـ PatientId) وبيضيف الفرادة فوقها كمان.
+            builder.Entity<Admission>()
+                .HasIndex(a => a.PatientId)
+                .IsUnique()
+                .HasFilter("[DischargeTime] IS NULL AND [CurrentState] = 1");
+
             // Enum -> string (أوضح في قاعدة البيانات)
             builder.Entity<Bed>().Property(b => b.Status).HasConversion<string>();
             builder.Entity<Admission>().Property(a => a.Status).HasConversion<string>();

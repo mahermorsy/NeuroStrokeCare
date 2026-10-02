@@ -55,13 +55,15 @@ export default function DataTable<T>({
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[640px] border-collapse">
+    <div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] border-collapse">
         <thead>
           <tr>
             {columns.map((col) => (
               <th
                 key={col.header}
+                scope="col"
                 style={col.width ? { width: col.width } : undefined}
                 className="border-b border-border px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-muted"
               >
@@ -81,7 +83,11 @@ export default function DataTable<T>({
             </tr>
           ))}
         </tbody>
-      </table>
+        </table>
+      </div>
+      <p className="mt-1.5 text-[10.5px] text-text-muted sm:hidden" aria-hidden="true">
+        Scroll sideways to see more →
+      </p>
     </div>
   )
 }

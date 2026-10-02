@@ -1,6 +1,8 @@
 using AutoMapper;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NeuroStrokeCare.Data.Constants;
 using NeuroStrokeCare.Core.Features.BaseService.Commands.Models;
 using NeuroStrokeCare.Core.Features.BaseService.Queries.Models;
 using NeuroStrokeCare.Core.Features.Bed.Dtos;
@@ -87,6 +89,7 @@ namespace NeuroStrokeCare.api.Controllers
         }
 
         // POST: api/bed?actingUserId=...
+        [Authorize(Roles = Roles.Admin)]
         [HttpPost]
         public async Task<ActionResult<Guid>> Create(
             [FromBody] CreateBedRequest request,
@@ -105,6 +108,7 @@ namespace NeuroStrokeCare.api.Controllers
         }
 
         // PUT: api/bed?actingUserId=...
+        [Authorize(Roles = Roles.Admin)]
         [HttpPut]
         public async Task<IActionResult> Update(
             [FromBody] UpdateBedRequest request,
@@ -123,6 +127,7 @@ namespace NeuroStrokeCare.api.Controllers
         }
 
         // PATCH: api/bed/{id}/status?actingUserId=...&status=1
+        [Authorize(Roles = Roles.Admin)]
         [HttpPatch("{id:guid}/status")]
         public async Task<IActionResult> ChangeStatus(
             Guid id,
@@ -137,6 +142,7 @@ namespace NeuroStrokeCare.api.Controllers
 
         // DELETE: api/bed/{id}
         // مقبول هنا: Bed إعداد مكاني (زي Ward)، مش تقرير طبي أو تاريخ مريض.
+        [Authorize(Roles = Roles.Admin)]
         [HttpDelete("{id:guid}")]
         public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
         {

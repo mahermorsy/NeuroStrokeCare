@@ -12,6 +12,8 @@ using NeuroStrokeCare.Data.Constants;
 using NeuroStrokeCare.Data.Enums;
 using NeuroStrokeCare.Data.PageModel;
 using NeuroStrokeCare.infrastructure.Context;
+using Microsoft.Data.SqlClient;
+using System.Text.RegularExpressions;
 
 namespace NeuroStrokeCare.api.Controllers
 {
@@ -57,6 +59,14 @@ namespace NeuroStrokeCare.api.Controllers
                 CTAFindings = a.CTAFindings
             };
         #endregion
+
+        // بنحدد تعارض الـ Unique Index بالاسم الصريح للإندكس نفسه (مش بس "أي DbUpdateException")
+        // عشان منلخّصش أخطاء قاعدة بيانات تانية (زي انتهاك Foreign Key) على إنها تعارض سرير/مريض
+        // غلط. 2601 = "Cannot insert duplicate key row ... with unique index '...'" في SQL Server.
+        private static bool IsUniqueIndexViolation(DbUpdateException ex, string indexName) =>
+            ex.InnerException is SqlException sqlEx
+            && sqlEx.Number == 2601
+            && sqlEx.Message.Contains(indexName, StringComparison.OrdinalIgnoreCase);
 
         // GET: api/admission
         [HttpGet]
@@ -109,6 +119,15 @@ namespace NeuroStrokeCare.api.Controllers
         }
 
         // POST: api/admission?actingUserId=...
+        // زي Transfer/SetStrokeType/RecordThrombolysis، الـ Create ده بيتجاوز الـ Add العام
+        // (AddAsyncGetIDCommand) عمدًا ويستخدم _context مباشرة، عشان لازم فحصين ينجحوا مع
+        // إنشاء الإدخال في نفس الحفظة (SaveChanges واحدة = معاملة واحدة ذرية):
+        //   - المريض ده معندوش إدخال مفتوح (DischargeTime == null) بالفعل - مينفعش يكون
+        //     عنده إدخالين نشطين في نفس الوقت (Conflict 409 لو عنده).
+        //   - لو تم تحديد سرير: السرير ده "شاغر" فعلاً (Conflict 409 لو مش شاغر، NotFound لو
+        //     غير موجود) وبيتحجز (BedStatus.Occupied) فورًا في نفس الحفظة.
+        // ملحوظة: زي ما Add العام بيعمل (LogAndAudit يتجاهل "Created" عمدًا)، معمول هنا نفس
+        // الحاجة - الإدخال نفسه فيه CreatedBy/CreatedAt، فمفيش صف Audit إضافي لإنشائه.
         [Authorize(Roles = Roles.AnyDoctor)]
         [HttpPost]
         public async Task<ActionResult<Guid>> Create(
@@ -116,16 +135,64 @@ namespace NeuroStrokeCare.api.Controllers
             [FromQuery] Guid actingUserId,
             CancellationToken cancellationToken)
         {
+            var hasOpenAdmission = await _context.Set<Admission>().AnyAsync(
+                a => a.PatientId == request.PatientId &&
+                     a.CurrentState == (int)CurrentStatusType.Active &&
+                     a.DischargeTime == null,
+                cancellationToken);
+
+            if (hasOpenAdmission)
+                return Conflict(new { message = "This patient already has an open admission — discharge or transfer it before admitting them again." });
+
+            Bed? bed = null;
+            if (request.BedId.HasValue)
+            {
+                bed = await _context.Set<Bed>().FirstOrDefaultAsync(b => b.Id == request.BedId.Value, cancellationToken);
+                if (bed == null)
+                    return NotFound(new { message = "Bed not found." });
+
+                if (bed.Status != BedStatus.Vacant)
+                    return Conflict(new { message = "This bed is already occupied or reserved — pick another bed." });
+            }
+
             var admission = _mapper.Map<Admission>(request);
             admission.AdmittedById = actingUserId;
+            admission.CreatedBy = actingUserId;
+            admission.CreatedAt = DateTime.UtcNow;
+            admission.CurrentState = (int)CurrentStatusType.Active;
 
-            var command = new AddAsyncGetIDCommand<Admission>(admission, actingUserId);
-            var (success, entityId) = await _mediator.Send(command, cancellationToken);
+            _context.Set<Admission>().Add(admission);
 
-            if (!success)
-                return BadRequest();
+            if (bed != null)
+            {
+                bed.Status = BedStatus.Occupied;
+                bed.UpdatedBy = actingUserId;
+                bed.UpdatedAt = DateTime.UtcNow;
+            }
 
-            return CreatedAtAction(nameof(GetById), new { id = entityId }, entityId);
+            try
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException ex)
+            {
+                // شبكتين أمان أخيرتين على مستوى قاعدة البيانات، لكل فحص فوق Unique Index بتاعه:
+                //   - IX_Admissions_BedId: لو حد سبقنا لنفس السرير في نفس اللحظة بالظبط.
+                //   - IX_Admissions_PatientId (Unique + Filtered على DischargeTime/CurrentState):
+                //     لو حد سبقنا بإدخال مفتوح لنفس المريض في نفس اللحظة بالظبط (الفحص AnyAsync
+                //     فوق بيغطي الحالة العادية، ده الحماية الأخيرة من الـ Race Condition).
+                // أي DbUpdateException تاني (مش من الاندكسين دول) بيتعاد رميه زي ما هو - مش كل
+                // خطأ قاعدة بيانات معناه تعارض سرير أو مريض.
+                if (IsUniqueIndexViolation(ex, "IX_Admissions_BedId"))
+                    return Conflict(new { message = "This bed was just taken by another admission — pick a different bed." });
+
+                if (IsUniqueIndexViolation(ex, "IX_Admissions_PatientId"))
+                    return Conflict(new { message = "This patient already has an open admission — discharge or transfer it before admitting them again." });
+
+                throw;
+            }
+
+            return CreatedAtAction(nameof(GetById), new { id = admission.Id }, admission.Id);
         }
 
         // PUT: api/admission?actingUserId=...
@@ -211,12 +278,32 @@ namespace NeuroStrokeCare.api.Controllers
             if (admission == null)
                 return NotFound();
 
-            // مريض خارج من المستشفى نهائيًا - السرير لازم يتحرر حتى لو الطلب نسي يقول كده
+            // قرار سياسة صريح: الإدخال اللي وصل لحالة نهائية (Discharged/TransferredOut) بيُقفل
+            // للأبد. ممنوع يرجع لحالة غير نهائية، ممنوع ياخد سرير تاني، DischargeTime ما تُمحاش
+            // أبدًا. مريض راجع للمستشفى تاني لازم يتعمله Admission جديد (Create) - "إعادة فتح"
+            // الإدخال القديم غير مسموح بيها خالص. بنرفض أي محاولة تغيّر الحالة الحالية (حتى لو
+            // كانت الحالة الجديدة المطلوبة نهائية هي كمان - زي Discharged -> TransferredOut -
+            // ما فيش مطلب عمل واضح بيسمح بالتحويل بين الحالتين النهائيتين، فمبنخترعوش). الطلب
+            // المكرر لنفس الحالة النهائية (Discharged -> Discharged) فقط هو المسموح (Idempotent).
+            // الفحص ده قبل أي قراية/تعديل تاني عمدًا - عشان لو رفضنا، صفر تغيير يحصل.
+            var currentIsTerminal = admission.Status == PatientStatus.Discharged || admission.Status == PatientStatus.TransferredOut;
+            if (currentIsTerminal && newStatus != admission.Status)
+            {
+                return Conflict(new { message = "This admission is closed and cannot be reopened. Create a new admission for the patient." });
+            }
+
+            // مريض خارج من المستشفى نهائيًا - السرير لازم يتحرر حتى لو الطلب نسي يقول كده.
+            // DischargeTime بتتسجل من السيرفر (UTC) هنا بس - مفيش أي قيمة من العميل (الفرونت)
+            // بتتصدّق أبدًا. لو كانت مسجلة بالفعل (مثلاً الـ Transfer ده اتبعت تاني غلط على
+            // إدخال خارج بالفعل) بنسيبها زي ما هي - القيمة التاريخية الأولى لا تُمسح ولا تُستبدل.
             var isLeavingHospital = newStatus == PatientStatus.Discharged || newStatus == PatientStatus.TransferredOut;
             if (isLeavingHospital)
             {
                 changeBed = true;
                 newBedId = null;
+
+                if (admission.DischargeTime == null)
+                    admission.DischargeTime = DateTime.UtcNow;
             }
 
             var oldBedId = admission.BedId;
@@ -260,28 +347,42 @@ namespace NeuroStrokeCare.api.Controllers
             admission.UpdatedBy = actingUserId;
             admission.UpdatedAt = DateTime.UtcNow;
 
-            try
-            {
-                await _context.SaveChangesAsync(cancellationToken);
-            }
-            catch (DbUpdateException)
-            {
-                // شبكة الأمان الأخيرة: لو اتنين حاولوا يحجزوا نفس السرير في نفس اللحظة بالظبط،
-                // الـ Unique Index على Admission.BedId هيمنع التاني على مستوى قاعدة البيانات
-                // نفسها حتى لو الفحص فوق فاته - بنرجعله رسالة واضحة بدل خطأ 500 خام.
-                return Conflict(new { message = "This bed was just taken by another admission — pick a different bed." });
-            }
+            // لو الإدخال خرج من المستشفى دلوقتي، بنضيف DischargeTime لنص الـ Details - ده
+            // بيوسّع الصيغة القديمة ("NewState=9") من غير ما يكسرها (GetTimeline تحت
+            // بتقرا NewState بـ Regex دلوقتي بدل Split صارم، فالإضافة دي ما بتأثرش عليه).
+            var details = $"NewState={(int)newStatus}";
+            if (isLeavingHospital && admission.DischargeTime.HasValue)
+                details += $";DischargeTime={admission.DischargeTime.Value:O}";
 
+            // الـ AuditLog بيتضاف لنفس الـ _context قبل أي SaveChanges - عشان الحالة السريرية/
+            // السرير وصف الأوديت يتسجلوا الكل في معاملة واحدة ذرية (SaveChangesAsync واحدة بس).
+            // قبل كان ده في حفظتين منفصلتين (ممكن الحالة تتسجل والأوديت يفضل من غيرها لو فشلت
+            // الحفظة التانية) - دلوقتي مستحيل يحصل ده: لو أي جزء فشل، الكل يرجع (Rollback).
             _context.Set<AuditLog>().Add(new AuditLog
             {
                 EntityName = nameof(Admission),
                 EntityId = id,
                 Action = "StatusChanged",
                 UserId = actingUserId,
-                Details = $"NewState={(int)newStatus}",
+                Details = details,
                 Timestamp = DateTime.UtcNow
             });
-            await _context.SaveChangesAsync(cancellationToken);
+
+            try
+            {
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException ex)
+            {
+                // شبكة الأمان الأخيرة: لو اتنين حاولوا يحجزوا نفس السرير في نفس اللحظة بالظبط،
+                // الـ Unique Index على Admission.BedId هيمنع التاني على مستوى قاعدة البيانات
+                // نفسها حتى لو الفحص فوق فاته - بنرجعله رسالة واضحة بدل خطأ 500 خام. أي
+                // DbUpdateException تاني (مش من الاندكس ده) بيتعاد رميه زي ما هو.
+                if (IsUniqueIndexViolation(ex, "IX_Admissions_BedId"))
+                    return Conflict(new { message = "This bed was just taken by another admission — pick a different bed." });
+
+                throw;
+            }
 
             return NoContent();
         }
@@ -400,10 +501,16 @@ namespace NeuroStrokeCare.api.Controllers
             var previousTimestamp = admission.AdmissionTime;
             foreach (var log in changes)
             {
+                // بنقرا NewState بـ Regex بدل Split('=') الصارم القديم، عشان Details ممكن
+                // دلوقتي يحمل معلومة زيادة بعد النقطة والفاصلة (زي DischargeTime في الانتقالات
+                // النهائية) من غير ما كده يكسر قراءة NewState نفسها.
                 int? status = null;
-                var parts = log.Details?.Split('=');
-                if (parts != null && parts.Length == 2 && int.TryParse(parts[1], out var parsed))
-                    status = parsed;
+                if (log.Details != null)
+                {
+                    var match = Regex.Match(log.Details, @"NewState=(-?\d+)");
+                    if (match.Success && int.TryParse(match.Groups[1].Value, out var parsed))
+                        status = parsed;
+                }
 
                 var label = status.HasValue && Enum.IsDefined(typeof(PatientStatus), status.Value)
                     ? ((PatientStatus)status.Value).ToString()

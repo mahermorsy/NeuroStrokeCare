@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { loadAdmissionReport, type AdmissionReport } from '@/lib/reportApi'
 import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
+import { describeApiError } from '@/lib/apiError'
 import {
   PATIENT_STATUS,
   STROKE_TYPE,
@@ -79,7 +80,14 @@ export default function Report() {
     setError(null)
     loadAdmissionReport(admissionId)
       .then(setReport)
-      .catch(() => setError('Could not load this admission’s report.'))
+      .catch((err) =>
+        setError(
+          describeApiError(err, {
+            404: 'This admission could not be found. It may have been removed.',
+            500: 'Could not load this admission’s report. Please try again in a moment.',
+          }),
+        ),
+      )
   }, [admissionId])
 
   if (error) {

@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { LogoMark } from '@/components/icons'
 import { requestNewAccount } from '@/lib/registerRequestApi'
 import { ALL_ROLES, ROLE_LABELS } from '@/lib/roles'
+import { describeApiError } from '@/lib/apiError'
 
 const emptyForm = {
   firstName: '',
@@ -24,6 +25,7 @@ export default function RequestAccount() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (submitting) return
     setSubmitting(true)
     setError(null)
     setMessage(null)
@@ -31,11 +33,11 @@ export default function RequestAccount() {
       const result = await requestNewAccount(form)
       setMessage(result.message)
     } catch (err) {
-      const data = (err as { response?: { data?: { errors?: string[]; message?: string } } })?.response?.data
       setError(
-        (Array.isArray(data?.errors) && data.errors.join(', ')) ||
-          data?.message ||
-          'Could not submit the request — check the fields and try again.',
+        describeApiError(err, {
+          400: 'Could not submit the request — check the fields and try again.',
+          409: 'A request or account with this username or email already exists.',
+        }),
       )
     } finally {
       setSubmitting(false)

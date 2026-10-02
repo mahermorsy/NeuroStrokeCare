@@ -47,6 +47,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - neurostroke_uploads:/app/App_Data/uploads
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -62,3 +64,4 @@ services:
 
 volumes:
   neurostroke_sql:
+  neurostroke_uploads:

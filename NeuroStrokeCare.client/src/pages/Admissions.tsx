@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { entityApi } from '@/lib/entityApi'
 import { useEntityList } from '@/hooks/useEntityList'
-import type { AdmissionResponse, PatientResponse, BedResponse } from '@/types/entities'
+import type { AdmissionResponse, PatientResponse, BedResponse, WardResponse } from '@/types/entities'
 import DataTable, { type Column } from '@/components/DataTable'
 import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
 import Modal from '@/components/Modal'
@@ -12,12 +12,21 @@ import { Field, TextInput, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
 import { BED_STATUS, PATIENT_STATUS, PATIENT_STATUS_OPTIONS, STROKE_TYPE, STROKE_TYPE_OPTIONS } from '@/lib/enums'
 import { isDoctorRole } from '@/lib/roles'
+import { isOpenAdmission } from '@/lib/admissions'
+import { describeApiError } from '@/lib/apiError'
 import { transferAdmission } from '@/lib/admissionTransferApi'
 import { setAdmissionStrokeType } from '@/lib/admissionStrokeTypeApi'
 
 const admissionsApi = entityApi<AdmissionResponse>('Admission')
 const patientsApi = entityApi<PatientResponse>('Patient')
 const bedsApi = entityApi<BedResponse>('Bed')
+const wardsApi = entityApi<WardResponse>('Ward')
+
+// Phase F1 - Frontend Hardening (Section 6/17): PatientStatus values 12 (Discharged) and 13
+// (TransferredOut) are the two terminal states - setting either via the Transfer modal ends the
+// admission for good (mirrors isOpenAdmission's own dischargeTime-based definition) and deserves
+// the same explicit confirmation step Patients.tsx now has for recording thrombolysis.
+const TERMINAL_STATUS_VALUES = [12, 13]
 
 const emptyForm = {
   patientId: '',
@@ -38,6 +47,7 @@ export default function Admissions() {
   const admissions = useEntityList(() => admissionsApi.list())
   const patients = useEntityList(() => patientsApi.list())
   const beds = useEntityList(() => bedsApi.list())
+  const wards = useEntityList(() => wardsApi.list())
 
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState(emptyForm)
@@ -49,6 +59,8 @@ export default function Admissions() {
   const [transferForm, setTransferForm] = useState({ status: 1, changeBed: false, bedId: '' })
   const [transferSubmitting, setTransferSubmitting] = useState(false)
   const [transferError, setTransferError] = useState<string | null>(null)
+  const [dischargeConfirmed, setDischargeConfirmed] = useState(false)
+  const isTerminalTransfer = TERMINAL_STATUS_VALUES.includes(transferForm.status)
 
   const [strokeTarget, setStrokeTarget] = useState<AdmissionResponse | null>(null)
   const [strokeValue, setStrokeValue] = useState(1)
@@ -60,6 +72,15 @@ export default function Admissions() {
     [patients.data],
   )
   const bedNumberById = useMemo(() => new Map(beds.data.map((b) => [b.id, b.bedNumber])), [beds.data])
+  const wardNameById = useMemo(() => new Map(wards.data.map((w) => [w.id, w.name])), [wards.data])
+  const wardNameByBedId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const b of beds.data) {
+      const name = wardNameById.get(b.wardId)
+      if (name) map.set(b.id, name)
+    }
+    return map
+  }, [beds.data, wardNameById])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -79,12 +100,15 @@ export default function Admissions() {
       setModalOpen(false)
       setForm(emptyForm)
       admissions.reload()
+      beds.reload()
     } catch (err) {
-      const status = (err as { response?: { status?: number } })?.response?.status
       setFormError(
-        status === 403
-          ? 'Only doctors (Consultant/Registrar/Resident) can admit or transfer patients between wards.'
-          : 'Could not create the admission — check the patient and bed selected.',
+        describeApiError(err, {
+          409: 'This patient already has an open admission, or that bed was just taken — please check and try again.',
+          403: 'Only doctors (Consultant/Registrar/Resident) can admit or transfer patients between wards.',
+          404: 'Selected bed could not be found.',
+          400: 'Could not create the admission — check the patient and bed selected.',
+        }),
       )
     } finally {
       setSubmitting(false)
@@ -95,11 +119,15 @@ export default function Admissions() {
     setTransferTarget(a)
     setTransferForm({ status: a.status, changeBed: false, bedId: a.bedId ?? '' })
     setTransferError(null)
+    setDischargeConfirmed(false)
   }
 
   async function handleTransferSubmit(e: FormEvent) {
     e.preventDefault()
     if (!user?.userId || !transferTarget) return
+    // Section 17: a terminal status change (Discharged/TransferredOut) must be explicitly
+    // confirmed before it fires - it ends the admission for good.
+    if (isTerminalTransfer && !dischargeConfirmed) return
     setTransferSubmitting(true)
     setTransferError(null)
     try {
@@ -113,15 +141,13 @@ export default function Admissions() {
       admissions.reload()
       beds.reload()
     } catch (err) {
-      const status = (err as { response?: { status?: number; data?: { message?: string } } })?.response?.status
-      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-      if (status === 409) {
-        setTransferError(message ?? 'That bed was just taken by another admission — pick a different one.')
-      } else if (status === 403) {
-        setTransferError('Only doctors (Consultant/Registrar/Resident) can transfer patients or change their status.')
-      } else {
-        setTransferError('Could not complete the transfer — please try again.')
-      }
+      setTransferError(
+        describeApiError(err, {
+          409: 'That bed was just taken by another admission — pick a different one.',
+          403: 'Only doctors (Consultant/Registrar/Resident) can transfer patients or change their status.',
+          400: 'Could not complete the transfer — please try again.',
+        }),
+      )
     } finally {
       setTransferSubmitting(false)
     }
@@ -143,11 +169,11 @@ export default function Admissions() {
       setStrokeTarget(null)
       admissions.reload()
     } catch (err) {
-      const status = (err as { response?: { status?: number } })?.response?.status
       setStrokeError(
-        status === 403
-          ? 'Only doctors (Consultant/Registrar/Resident) can set the stroke type.'
-          : 'Could not save the stroke type — please try again.',
+        describeApiError(err, {
+          403: 'Only doctors (Consultant/Registrar/Resident) can set the stroke type.',
+          400: 'Could not save the stroke type — please try again.',
+        }),
       )
     } finally {
       setStrokeSubmitting(false)
@@ -160,10 +186,45 @@ export default function Admissions() {
     (b) => BED_STATUS[b.status as keyof typeof BED_STATUS] === 'Vacant' || b.id === transferTarget?.bedId,
   )
 
+  // beds selectable when creating a brand-new admission: vacant only — there's no
+  // "current bed" exception here since the admission doesn't exist yet. The backend
+  // re-validates this on submit (409 if the bed was taken in the meantime), this is
+  // just to stop the doctor from picking an occupied bed in the first place.
+  const vacantBedsForCreate = beds.data.filter((b) => BED_STATUS[b.status as keyof typeof BED_STATUS] === 'Vacant')
+
   const columns: Column<AdmissionResponse>[] = [
-    { header: 'Patient', render: (a) => patientNameById.get(a.patientId) ?? a.patientId.slice(0, 8) },
-    { header: 'Bed', render: (a) => (a.bedId ? bedNumberById.get(a.bedId) ?? '—' : '—') },
-    { header: 'Admitted', render: (a) => new Date(a.admissionTime).toLocaleString() },
+    {
+      header: 'Patient',
+      render: (a) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-text">{patientNameById.get(a.patientId) ?? 'Unknown patient'}</span>
+          {!isOpenAdmission(a) && <span className="text-[11.5px] text-text-muted">Discharged — read only</span>}
+        </div>
+      ),
+    },
+    {
+      header: 'Bed / Ward',
+      render: (a) =>
+        a.bedId ? (
+          <div className="flex flex-col gap-0.5">
+            <span>{bedNumberById.get(a.bedId) ?? '—'}</span>
+            <span className="text-[11.5px] text-text-muted">{wardNameByBedId.get(a.bedId) ?? '—'}</span>
+          </div>
+        ) : (
+          <span className="text-text-muted">Unassigned</span>
+        ),
+    },
+    {
+      header: 'Admitted',
+      render: (a) => (
+        <div className="flex flex-col gap-0.5">
+          <span>{new Date(a.admissionTime).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          <span className="text-[11.5px] text-text-muted">
+            {new Date(a.admissionTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      ),
+    },
     {
       header: 'Status',
       render: (a) => {
@@ -174,44 +235,46 @@ export default function Admissions() {
     {
       header: 'Stroke type',
       render: (a) =>
-        canManage ? (
+        canManage && isOpenAdmission(a) ? (
           <button
             type="button"
             onClick={() => openStrokeType(a)}
-            className="rounded-md px-1.5 py-0.5 text-[12.5px] font-medium text-text-primary hover:bg-accent/10 hover:text-accent"
+            className="rounded-md px-1.5 py-0.5 text-[12.5px] font-medium text-text-primary transition-colors duration-150 hover:bg-accent/10 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             {a.strokeType ? STROKE_TYPE[a.strokeType as keyof typeof STROKE_TYPE] : 'Set stroke type…'}
           </button>
         ) : a.strokeType ? (
           STROKE_TYPE[a.strokeType as keyof typeof STROKE_TYPE]
         ) : (
-          '—'
+          <span className="text-text-muted">—</span>
         ),
     },
     {
       header: 'Imaging',
       render: (a) => (
         <span className="text-text-secondary">
-          {[a.ctDone && 'CT', a.mriDone && 'MRI', a.ctaDone && 'CTA'].filter(Boolean).join(', ') || '—'}
+          {[a.ctDone && 'CT', a.mriDone && 'MRI', a.ctaDone && 'CTA'].filter(Boolean).join(', ') || (
+            <span className="text-text-muted">—</span>
+          )}
         </span>
       ),
     },
     {
-      header: '',
+      header: 'Actions',
       render: (a) => (
-        <div className="flex flex-wrap gap-1.5">
-          {canManage && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {canManage && isOpenAdmission(a) && (
             <button
               type="button"
               onClick={() => openTransfer(a)}
-              className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-accent hover:bg-accent/10"
+              className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-accent transition-colors duration-150 hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               Transfer / update
             </button>
           )}
           <Link
             to={`/report/${a.id}`}
-            className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-text-secondary hover:bg-border-soft"
+            className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-text-secondary transition-colors duration-150 hover:bg-border-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             Report
           </Link>
@@ -227,9 +290,18 @@ export default function Admissions() {
         subtitle={`${admissions.data.length} admission${admissions.data.length === 1 ? '' : 's'} on record`}
         action={
           canManage ? (
-            <PrimaryButton onClick={() => setModalOpen(true)} disabled={patients.data.length === 0}>
-              + New admission
-            </PrimaryButton>
+            <div className="flex flex-col items-end gap-1">
+              <PrimaryButton
+                onClick={() => setModalOpen(true)}
+                disabled={patients.data.length === 0}
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
+              >
+                + New admission
+              </PrimaryButton>
+              {patients.data.length === 0 && (
+                <span className="text-[12px] text-text-muted">Add a patient first</span>
+              )}
+            </div>
           ) : (
             <span className="text-[12.5px] text-text-muted">Only doctors can admit or transfer patients</span>
           )
@@ -241,10 +313,12 @@ export default function Admissions() {
           columns={columns}
           rows={admissions.data}
           rowKey={(a) => a.id}
-          loading={admissions.loading || patients.loading}
+          loading={admissions.loading || patients.loading || beds.loading || wards.loading}
           error={admissions.error}
           onRetry={admissions.reload}
-          emptyMessage="No admissions yet."
+          emptyMessage={
+            canManage ? 'No admissions yet — use "+ New admission" above to add one.' : 'No admissions yet.'
+          }
         />
       </Card>
 
@@ -282,12 +356,15 @@ export default function Admissions() {
           <Field label="Bed (optional)">
             <Select value={form.bedId} onChange={(e) => setForm({ ...form, bedId: e.target.value })}>
               <option value="">No bed assigned</option>
-              {beds.data.map((b) => (
+              {vacantBedsForCreate.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.bedNumber}
                 </option>
               ))}
             </Select>
+            {beds.data.length > 0 && vacantBedsForCreate.length === 0 && (
+              <span className="text-[12px] text-text-muted">No vacant beds right now — this admission can still be created without one.</span>
+            )}
           </Field>
 
           {formError && (
@@ -311,7 +388,10 @@ export default function Admissions() {
           <Field label="New status">
             <Select
               value={transferForm.status}
-              onChange={(e) => setTransferForm({ ...transferForm, status: Number(e.target.value) })}
+              onChange={(e) => {
+                setTransferForm({ ...transferForm, status: Number(e.target.value) })
+                setDischargeConfirmed(false)
+              }}
             >
               {PATIENT_STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
@@ -320,6 +400,19 @@ export default function Admissions() {
               ))}
             </Select>
           </Field>
+
+          {isTerminalTransfer && (
+            <label className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning-bg px-3 py-2.5 text-[12.5px] font-medium text-warning">
+              <input
+                type="checkbox"
+                checked={dischargeConfirmed}
+                onChange={(e) => setDischargeConfirmed(e.target.checked)}
+                className="mt-0.5"
+              />
+              I confirm this ends the admission — the patient will show as discharged/transferred out and this
+              cannot be undone from here.
+            </label>
+          )}
 
           <label className="flex items-center gap-2 text-[13.5px] text-text-secondary">
             <input
@@ -355,7 +448,7 @@ export default function Admissions() {
             </p>
           )}
 
-          <PrimaryButton type="submit" disabled={transferSubmitting}>
+          <PrimaryButton type="submit" disabled={transferSubmitting || (isTerminalTransfer && !dischargeConfirmed)}>
             {transferSubmitting ? 'Saving…' : 'Save'}
           </PrimaryButton>
         </form>

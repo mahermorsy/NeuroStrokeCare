@@ -1,6 +1,8 @@
 using AutoMapper;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NeuroStrokeCare.Data.Constants;
 using NeuroStrokeCare.Core.Features.BaseService.Commands.Models;
 using NeuroStrokeCare.Core.Features.BaseService.Queries.Models;
 using NeuroStrokeCare.Core.Features.Ward.Dtos;
@@ -90,6 +92,7 @@ namespace NeuroStrokeCare.api.Controllers
         // POST: api/ward?actingUserId=...
         // TODO: actingUserId مؤقتاً بتيجي من الـ Query String لحد ما نضيف الـ Authentication
         // ونجيبها من الـ Claims بتاعة اليوزر المسجل دخول بدل ما تتبعت من برة.
+        [Authorize(Roles = Roles.Admin)]
         [HttpPost]
         public async Task<ActionResult<Guid>> Create(
             [FromBody] CreateWardRequest request,
@@ -108,6 +111,7 @@ namespace NeuroStrokeCare.api.Controllers
         }
 
         // PUT: api/ward?actingUserId=...
+        [Authorize(Roles = Roles.Admin)]
         [HttpPut]
         public async Task<IActionResult> Update(
             [FromBody] UpdateWardRequest request,
@@ -127,6 +131,7 @@ namespace NeuroStrokeCare.api.Controllers
 
         // PATCH: api/ward/{id}/status?actingUserId=...&status=1
         // بيستخدم للـ Soft Delete كمان (status = Inactive) بدل الحذف الفعلي
+        [Authorize(Roles = Roles.Admin)]
         [HttpPatch("{id:guid}/status")]
         public async Task<IActionResult> ChangeStatus(
             Guid id,
@@ -142,6 +147,7 @@ namespace NeuroStrokeCare.api.Controllers
         // DELETE: api/ward/{id}
         // ملحوظة: الحذف هنا فعلي (Hard Delete) — مقبول لأن Ward مش كيان طبي (تقرير/تاريخ مريض)،
         // مجرد إعدادات مكانية (أجنحة/أسرّة). للكيانات الطبية استخدم ChangeStatus بدل كدة.
+        [Authorize(Roles = Roles.Admin)]
         [HttpDelete("{id:guid}")]
         public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
         {

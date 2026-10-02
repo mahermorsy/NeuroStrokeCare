@@ -22,6 +22,11 @@ export default defineConfig({
         target: 'http://localhost:5271',
         changeOrigin: true,
       },
+      // Staff ID card photos, served by the API from its uploads folder.
+      '/uploads': {
+        target: 'http://localhost:5271',
+        changeOrigin: true,
+      },
     },
   },
 })

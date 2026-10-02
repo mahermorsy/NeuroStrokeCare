@@ -11,6 +11,7 @@ import Modal from '@/components/Modal'
 import { Field, TextInput, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
 import { isDoctorRole, isNurseRole } from '@/lib/roles'
+import { describeApiError } from '@/lib/apiError'
 
 const labResultsApi = entityApi<LabResultsResponse>('LabResults')
 const admissionsApi = entityApi<AdmissionResponse>('Admission')
@@ -19,20 +20,25 @@ function value(v: number | null, unit = '') {
   return v === null || v === undefined ? '—' : `${v}${unit}`
 }
 
-const NUMERIC_FIELDS: { key: keyof typeof emptyForm; label: string; step?: string }[] = [
-  { key: 'glucoseMmol', label: 'Glucose (mmol/L)', step: '0.1' },
-  { key: 'inr', label: 'INR', step: '0.01' },
-  { key: 'pt', label: 'PT', step: '0.1' },
-  { key: 'platelets', label: 'Platelets', step: '1' },
-  { key: 'sodium', label: 'Sodium', step: '0.1' },
-  { key: 'potassium', label: 'Potassium', step: '0.1' },
-  { key: 'creatinine', label: 'Creatinine', step: '0.01' },
-  { key: 'hemoglobin', label: 'Hemoglobin', step: '0.1' },
-  { key: 'ldl', label: 'LDL', step: '0.1' },
-  { key: 'hbA1c', label: 'HbA1c', step: '0.1' },
-  { key: 'aPTT', label: 'aPTT', step: '0.1' },
-  { key: 'alt', label: 'ALT', step: '1' },
-  { key: 'ast', label: 'AST', step: '1' },
+// Phase F1 - Frontend Hardening (Section 9): every one of these is a physical lab quantity that
+// cannot be negative in reality, so `min="0"` is a basic input sanity floor, not a new clinical
+// threshold — it stops an obviously-invalid negative value from ever reaching the backend and
+// surfacing there as a generic validation error. No upper bound is imposed here since "what
+// counts as a dangerously high/low result" is a clinical judgment this phase must not encode.
+const NUMERIC_FIELDS: { key: keyof typeof emptyForm; label: string; step?: string; min?: string }[] = [
+  { key: 'glucoseMmol', label: 'Glucose (mmol/L)', step: '0.1', min: '0' },
+  { key: 'inr', label: 'INR', step: '0.01', min: '0' },
+  { key: 'pt', label: 'PT', step: '0.1', min: '0' },
+  { key: 'platelets', label: 'Platelets', step: '1', min: '0' },
+  { key: 'sodium', label: 'Sodium', step: '0.1', min: '0' },
+  { key: 'potassium', label: 'Potassium', step: '0.1', min: '0' },
+  { key: 'creatinine', label: 'Creatinine', step: '0.01', min: '0' },
+  { key: 'hemoglobin', label: 'Hemoglobin', step: '0.1', min: '0' },
+  { key: 'ldl', label: 'LDL', step: '0.1', min: '0' },
+  { key: 'hbA1c', label: 'HbA1c', step: '0.1', min: '0' },
+  { key: 'aPTT', label: 'aPTT', step: '0.1', min: '0' },
+  { key: 'alt', label: 'ALT', step: '1', min: '0' },
+  { key: 'ast', label: 'AST', step: '1', min: '0' },
 ]
 
 const emptyForm = {
@@ -57,7 +63,7 @@ const emptyForm = {
 export default function LabResults() {
   const { user } = useAuth()
   const { data, loading, error, reload } = useEntityList(() => labResultsApi.list())
-  const { patientNameByAdmissionId, loading: contextLoading } = useAdmissionContext()
+  const { patientNameByAdmissionId, loading: contextLoading, error: contextError, reload: reloadContext } = useAdmissionContext()
   const admissions = useEntityList(() => admissionsApi.list())
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -75,6 +81,10 @@ export default function LabResults() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    // Guards against a rapid double-click/double-submit firing a second request before the
+    // button's disabled={submitting} re-render takes effect (Phase F1 - Frontend Hardening,
+    // Section 16).
+    if (submitting) return
     if (!user?.userId) return
     setSubmitting(true)
     setFormError(null)
@@ -104,11 +114,11 @@ export default function LabResults() {
       setModalOpen(false)
       reload()
     } catch (err) {
-      const status = (err as { response?: { status?: number } })?.response?.status
       setFormError(
-        status === 403
-          ? 'Only doctors or nursing staff can record lab results.'
-          : 'Could not save the lab result — check the admission and values entered.',
+        describeApiError(err, {
+          403: 'Only doctors or nursing staff can record lab results.',
+          400: 'Could not save the lab result — check the admission and values entered.',
+        }),
       )
     } finally {
       setSubmitting(false)
@@ -171,6 +181,15 @@ export default function LabResults() {
         }
       />
 
+      {contextError && !error && (
+        <p className="rounded-lg bg-warning-bg px-3 py-2 text-[12.5px] font-medium text-warning">
+          Patient names couldn't be loaded, so rows below may show as "—".{' '}
+          <button type="button" onClick={reloadContext} className="underline">
+            Retry
+          </button>
+        </p>
+      )}
+
       <Card>
         <DataTable
           columns={columns}
@@ -222,6 +241,7 @@ export default function LabResults() {
                 <TextInput
                   type="number"
                   step={f.step}
+                  min={f.min}
                   value={form[f.key]}
                   onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
                 />

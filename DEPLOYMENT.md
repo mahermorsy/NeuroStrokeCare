@@ -45,5 +45,6 @@ anything. Set all of these to enable real reset emails:
 ## Notes
 
 - The committed `appsettings.json` intentionally does not contain secrets.
-- The frontend Nginx config proxies `/api/*` to the API container using the Docker service name `api`.
+- The frontend Nginx config proxies `/api/*` and `/uploads/*` to the API container using the Docker service name `api`.
+- Staff ID card photos are stored on the API container's own disk under `App_Data/uploads`, backed by the `neurostroke_uploads` Docker volume so they survive redeploys. No external storage (S3, etc.) is used.
 - EF Core migrations exist under `NeuroStrokeCare.infrastructure/Migrations`, but the API currently does not automatically call `Database.Migrate()` at startup.

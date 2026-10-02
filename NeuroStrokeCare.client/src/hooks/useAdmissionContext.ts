@@ -23,5 +23,15 @@ export function useAdmissionContext() {
   return {
     patientNameByAdmissionId,
     loading: admissions.loading || patients.loading,
+    // Phase F1 - Frontend Hardening (Section 11, loading/error states). Previously this hook
+    // swallowed its own fetch failures entirely — a consumer had no way to know the admission
+    // or patient lookups behind every "Unknown patient" fallback had actually failed vs. simply
+    // being empty. Exposing both lets LabResults/Assessments/DoorTiming show a real error+retry
+    // instead of silently mislabeling every row.
+    error: admissions.error ?? patients.error ?? null,
+    reload: () => {
+      admissions.reload()
+      patients.reload()
+    },
   }
 }

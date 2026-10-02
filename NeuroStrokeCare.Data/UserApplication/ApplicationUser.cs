@@ -21,5 +21,11 @@ namespace NeuroStrokeCare.Data.UserApplication
         // them and assigns a real role (RequestedRole is only what the applicant asked for).
         public bool IsApproved { get; set; } = true;
         public string? RequestedRole { get; set; }
+
+        // Staff ID card: a hospital-assigned employee/carnet number (set by an Admin,
+        // not chosen by the employee) and a self-uploaded profile photo, served from
+        // the API's own /uploads static path (see Program.cs UseStaticFiles).
+        public string? EmployeeId { get; set; }
+        public string? ProfilePhotoUrl { get; set; }
     }
 }

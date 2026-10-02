@@ -11,6 +11,7 @@ import Modal from '@/components/Modal'
 import { Field, TextArea, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
 import { isDoctorRole, isNurseRole, roleLabel } from '@/lib/roles'
+import { describeApiError } from '@/lib/apiError'
 
 const admissionsApi = entityApi<AdmissionResponse>('Admission')
 const patientsApi = entityApi<PatientResponse>('Patient')
@@ -42,6 +43,9 @@ export default function FollowUp() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    // Guard against a double-click/double-Enter firing two concurrent creates before the
+    // disabled-button re-render lands (Phase F1 - Frontend Hardening, Section 16).
+    if (submitting) return
     if (!user?.userId) return
     setSubmitting(true)
     setFormError(null)
@@ -59,11 +63,11 @@ export default function FollowUp() {
       setForm(emptyForm)
       notes.reload()
     } catch (err) {
-      const status = (err as { response?: { status?: number } })?.response?.status
       setFormError(
-        status === 403
-          ? 'Only doctors or nursing staff can add follow-up notes.'
-          : 'Could not save the note — check the admission selected.',
+        describeApiError(err, {
+          403: 'Only doctors or nursing staff can add follow-up notes.',
+          400: 'Could not save the note — check the admission selected.',
+        }),
       )
     } finally {
       setSubmitting(false)

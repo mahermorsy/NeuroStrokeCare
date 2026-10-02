@@ -165,6 +165,8 @@ export interface UserSummaryResponse {
   role: string
   isRootSuperAdmin: boolean
   createdAt: string
+  employeeId: string | null
+  profilePhotoUrl: string | null
 }
 
 export interface PendingUserResponse {

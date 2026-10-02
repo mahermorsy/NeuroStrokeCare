@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { LogoMark } from '@/components/icons'
 import { resetPassword } from '@/lib/passwordResetApi'
+import { describeApiError } from '@/lib/apiError'
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams()
@@ -20,6 +21,7 @@ export default function ResetPassword() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (submitting) return
     setSubmitting(true)
     setError(null)
     try {
@@ -30,8 +32,12 @@ export default function ResetPassword() {
       }
       setDone(true)
       setTimeout(() => navigate('/login', { replace: true }), 1800)
-    } catch {
-      setError('Could not reset the password — the link may have expired, request a new one.')
+    } catch (err) {
+      setError(
+        describeApiError(err, {
+          400: 'Could not reset the password — the link may have expired, request a new one.',
+        }),
+      )
     } finally {
       setSubmitting(false)
     }

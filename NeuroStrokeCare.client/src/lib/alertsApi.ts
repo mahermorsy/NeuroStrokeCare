@@ -127,6 +127,40 @@ export async function loadAlerts(): Promise<AlertItem[]> {
     }
   })
 
+  // Stroke Code, live: once a clinician activates a stroke code (creating the
+  // DoorTiming record is the activation itself), this watches the same two
+  // windows the Delayed pills check — but *before* the milestone is ever
+  // recorded, while the code is still open. It only becomes an alert once a
+  // window is actually missed, not the instant the code opens, so the sidebar
+  // badge stays quiet unless the team is genuinely behind. Standing a code
+  // down (DoorTiming.tsx "Stand down") removes it from this list immediately,
+  // since closed records drop out of the active DoorTiming query entirely.
+  doorTimings.forEach((d) => {
+    const elapsedMin = (Date.now() - new Date(d.er_StrokeArrival).getTime()) / 60000
+    if (!d.doorToCT && elapsedMin > 25) {
+      alerts.push({
+        id: `code-ct-${d.id}`,
+        severity: 'critical',
+        category: 'Stroke Code',
+        patientName: nameFor(d.admissionId),
+        admissionId: d.admissionId,
+        message: `CT not yet done — ${Math.round(elapsedMin)} min since stroke code activation (target ≤ 25)`,
+        when: d.er_StrokeArrival,
+      })
+    }
+    if (!d.doorToNeedle && elapsedMin > 60) {
+      alerts.push({
+        id: `code-needle-${d.id}`,
+        severity: 'critical',
+        category: 'Stroke Code',
+        patientName: nameFor(d.admissionId),
+        admissionId: d.admissionId,
+        message: `Needle decision not yet made — ${Math.round(elapsedMin)} min since stroke code activation (target ≤ 60)`,
+        when: d.er_StrokeArrival,
+      })
+    }
+  })
+
   nihss.forEach((r) => {
     if (r.totalScore > 15) {
       alerts.push({

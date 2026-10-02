@@ -32,7 +32,7 @@ export function PrimaryButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`rounded-2xl border border-border bg-surface p-4 shadow-[0_1px_2px_rgba(16,40,45,0.04)] sm:p-6 ${className}`}
+      className={`rounded-2xl border border-border bg-surface p-4 shadow-[0_1px_3px_rgba(10,25,48,0.06)] sm:p-6 ${className}`}
     >
       {children}
     </div>

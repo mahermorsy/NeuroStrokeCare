@@ -21,6 +21,7 @@ import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
 import Modal from '@/components/Modal'
 import { Field, TextInput, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
+import { AlertIcon } from '@/components/icons'
 import { BRADEN_RISK_LEVEL, GCS_SEVERITY, GUSS_SEVERITY, MORSE_RISK_LEVEL, riskTone, STROKE_TYPE } from '@/lib/enums'
 import { isDoctorRole, isNurseRole } from '@/lib/roles'
 
@@ -308,7 +309,7 @@ function FieldInput({
 }) {
   if (field.type === 'select') {
     return (
-      <Field label={field.label}>
+      <Field label={field.label} required>
         <Select value={value as number} onChange={(e) => onChange(Number(e.target.value))}>
           {field.options.map((o) => (
             <option key={o} value={o}>
@@ -321,15 +322,20 @@ function FieldInput({
   }
   if (field.type === 'checkbox') {
     return (
-      <label className="flex items-center gap-2 text-[13px] text-text-secondary">
-        <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
-        {field.label}
+      <label className="flex items-center gap-2.5 rounded-lg border border-border-subtle bg-surface px-3 py-2.5 text-[13px] text-text-secondary transition-colors duration-150 hover:bg-border-soft/60">
+        <input
+          type="checkbox"
+          checked={!!value}
+          onChange={(e) => onChange(e.target.checked)}
+          className="h-4 w-4 shrink-0 accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+        />
+        <span>{field.label}</span>
       </label>
     )
   }
   if (field.type === 'number') {
     return (
-      <Field label={field.label}>
+      <Field label={field.label} required>
         <TextInput
           type="number"
           min={field.min}
@@ -360,25 +366,58 @@ function FieldInput({
 
 function AssessmentTable({ tab }: { tab: TabDef }) {
   const { data, loading, error, reload } = useEntityList<Row>(() => tab.fetch() as Promise<Row[]>, [tab.key])
-  const { patientNameByAdmissionId, loading: contextLoading } = useAdmissionContext()
+  const { patientNameByAdmissionId, loading: contextLoading, error: contextError, reload: reloadContext } = useAdmissionContext()
 
   const columns: Column<Row>[] = [
-    { header: 'Patient', render: (r) => patientNameByAdmissionId.get(r.admissionId) ?? '—' },
-    { header: 'Assessed at', render: (r) => new Date(r.assessedAt).toLocaleString() },
-    { header: 'Total score', render: (r) => r.totalScore },
+    {
+      header: 'Patient',
+      render: (r) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-text">{patientNameByAdmissionId.get(r.admissionId) ?? '—'}</span>
+          <span className="text-[11.5px] text-text-muted">Admission #{r.admissionId.slice(0, 8).toUpperCase()}</span>
+        </div>
+      ),
+    },
+    {
+      header: 'Assessed at',
+      render: (r) => (
+        <div className="flex flex-col gap-0.5">
+          <span>
+            {new Date(r.assessedAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+          </span>
+          <span className="text-[11.5px] text-text-muted">
+            {new Date(r.assessedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      ),
+    },
+    {
+      header: 'Total score',
+      render: (r) => <span className="text-[15px] font-semibold text-text">{r.totalScore}</span>,
+    },
     { header: 'Result', render: (r) => <StatusPill label={tab.scoreLabel(r)} tone={tab.scoreTone(r)} /> },
   ]
 
   return (
-    <DataTable
-      columns={columns}
-      rows={data}
-      rowKey={(r) => r.id}
-      loading={loading || contextLoading}
-      error={error}
-      onRetry={reload}
-      emptyMessage={`No ${tab.label} assessments recorded yet.`}
-    />
+    <div className="flex flex-col gap-3">
+      {contextError && !error && (
+        <p className="rounded-lg bg-warning-bg px-3 py-2 text-[12.5px] font-medium text-warning">
+          Patient names couldn't be loaded, so rows below may show as "—".{' '}
+          <button type="button" onClick={reloadContext} className="underline">
+            Retry
+          </button>
+        </p>
+      )}
+      <DataTable
+        columns={columns}
+        rows={data}
+        rowKey={(r) => r.id}
+        loading={loading || contextLoading}
+        error={error}
+        onRetry={reload}
+        emptyMessage={`No ${tab.label} assessments recorded yet.`}
+      />
+    </div>
   )
 }
 
@@ -451,7 +490,11 @@ export default function Assessments() {
         subtitle="Clinical scoring tools, grouped by type"
         action={
           canWrite ? (
-            <PrimaryButton onClick={openNew} disabled={admissions.data.length === 0}>
+            <PrimaryButton
+              onClick={openNew}
+              disabled={admissions.data.length === 0}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
+            >
               + New {activeTab.label}
             </PrimaryButton>
           ) : (
@@ -471,7 +514,7 @@ export default function Assessments() {
               key={tab.key}
               type="button"
               onClick={() => setActive(tab.key)}
-              className={`rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+              className={`rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${
                 tab.key === active ? 'bg-accent text-white' : 'bg-border-soft text-text-secondary hover:bg-border'
               }`}
             >
@@ -482,54 +525,80 @@ export default function Assessments() {
         <AssessmentTable key={activeTab.key + reloadKey} tab={activeTab} />
       </Card>
 
-      <Modal open={modalOpen} title={`New ${activeTab.label} assessment`} onClose={() => setModalOpen(false)}>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
-          <Field label="Patient / admission">
-            <Select required value={admissionId} onChange={(e) => setAdmissionId(e.target.value)}>
-              <option value="" disabled>
-                Select an admission…
-              </option>
-              {admissions.data.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {patientNameByAdmissionId.get(a.id) ?? a.id.slice(0, 8)} —{' '}
-                  {new Date(a.admissionTime).toLocaleDateString()}
+      <Modal
+        open={modalOpen}
+        title={`New ${activeTab.label} assessment`}
+        onClose={() => setModalOpen(false)}
+        size="wide"
+      >
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-border-soft/40 p-3.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+              Assessment context
+            </span>
+            <Field label="Patient / admission" required>
+              <Select required value={admissionId} onChange={(e) => setAdmissionId(e.target.value)}>
+                <option value="" disabled>
+                  Select an admission…
                 </option>
-              ))}
-            </Select>
-          </Field>
+                {admissions.data.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {patientNameByAdmissionId.get(a.id) ?? a.id.slice(0, 8)} —{' '}
+                    {new Date(a.admissionTime).toLocaleDateString()}
+                  </option>
+                ))}
+              </Select>
+            </Field>
 
-          <Field label="Assessed at">
-            <TextInput
-              type="datetime-local"
-              required
-              value={assessedAt}
-              onChange={(e) => setAssessedAt(e.target.value)}
-            />
-          </Field>
+            <Field label="Assessed at" required>
+              <TextInput
+                type="datetime-local"
+                required
+                value={assessedAt}
+                onChange={(e) => setAssessedAt(e.target.value)}
+              />
+            </Field>
+          </div>
 
           {strokeTypeMismatch && selectedAdmission?.strokeType != null && (
-            <p className="rounded-lg bg-warning-bg px-3 py-2 text-[12.5px] font-medium text-warning">
-              {activeTab.label} isn't typically used for a {STROKE_TYPE[selectedAdmission.strokeType as keyof typeof STROKE_TYPE]}{' '}
-              stroke — you can still record it if there's a clinical reason to.
+            <p className="flex items-start gap-1.5 rounded-lg bg-warning-bg px-3 py-2 text-[12.5px] font-medium text-warning">
+              <AlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>
+                {activeTab.label} isn't typically used for a{' '}
+                {STROKE_TYPE[selectedAdmission.strokeType as keyof typeof STROKE_TYPE]} stroke — you can still
+                record it if there's a clinical reason to.
+              </span>
             </p>
           )}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {activeTab.fields.map((f) => (
-              <FieldInput
-                key={f.key}
-                field={f}
-                value={values[f.key]}
-                onChange={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
-              />
-            ))}
-          </div>
+          <fieldset className="flex flex-col gap-3 rounded-xl border border-border-subtle p-3.5">
+            <legend className="px-1 text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+              {activeTab.label} items
+            </legend>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {activeTab.fields.map((f) => (
+                <FieldInput
+                  key={f.key}
+                  field={f}
+                  value={values[f.key]}
+                  onChange={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+                />
+              ))}
+            </div>
+          </fieldset>
 
           {formError && (
-            <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{formError}</p>
+            <p className="flex items-start gap-1.5 rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">
+              <AlertIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>{formError}</span>
+            </p>
           )}
 
-          <PrimaryButton type="submit" disabled={submitting}>
+          <PrimaryButton
+            type="submit"
+            disabled={submitting}
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
+          >
             {submitting ? 'Saving…' : 'Save assessment'}
           </PrimaryButton>
         </form>

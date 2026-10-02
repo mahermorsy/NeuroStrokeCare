@@ -10,33 +10,74 @@ import Modal from '@/components/Modal'
 import { Field, TextInput, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
 import { BED_STATUS, BED_STATUS_OPTIONS, BED_STATUS_TONE } from '@/lib/enums'
+import { describeApiError } from '@/lib/apiError'
 
 const wardsApi = entityApi<WardResponse>('Ward')
 const bedsApi = entityApi<BedResponse>('Bed')
 
+const emptyWardForm = { code: '', name: '', totalBeds: '' }
+const emptyBedForm = { wardId: '', bedNumber: '', status: 1 }
+
 export default function WardsBeds() {
   const { user } = useAuth()
+  const isAdmin = user?.role === 'Admin'
   const wards = useEntityList(() => wardsApi.list())
   const beds = useEntityList(() => bedsApi.list())
 
   const [wardModalOpen, setWardModalOpen] = useState(false)
   const [bedModalOpen, setBedModalOpen] = useState(false)
-  const [wardForm, setWardForm] = useState({ code: '', name: '', totalBeds: '' })
-  const [bedForm, setBedForm] = useState({ wardId: '', bedNumber: '', status: 1 })
+  const [editingWardId, setEditingWardId] = useState<string | null>(null)
+  const [editingBedId, setEditingBedId] = useState<string | null>(null)
+  const [wardForm, setWardForm] = useState(emptyWardForm)
+  const [bedForm, setBedForm] = useState(emptyBedForm)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
   const wardNameById = useMemo(() => new Map(wards.data.map((w) => [w.id, w.name])), [wards.data])
 
-  const occupancyByWard = useMemo(() => {
-    const map = new Map<string, { occupied: number; total: number }>()
+  // Live counts from the actual Bed rows in each ward — not the Ward's own
+  // `totalBeds` field, which is just the planned capacity typed in once at
+  // creation and never updates itself as beds are actually added or removed.
+  // Using it as the denominator here is what made the number look "stuck".
+  const countsByWard = useMemo(() => {
+    const map = new Map<string, { occupied: number; actual: number }>()
     for (const ward of wards.data) {
       const wardBeds = beds.data.filter((b) => b.wardId === ward.id)
-      const occupied = wardBeds.filter((b) => b.status === 2).length
-      map.set(ward.id, { occupied, total: ward.totalBeds })
+      map.set(ward.id, {
+        occupied: wardBeds.filter((b) => BED_STATUS[b.status as keyof typeof BED_STATUS] === 'Occupied').length,
+        actual: wardBeds.length,
+      })
     }
     return map
   }, [wards.data, beds.data])
+
+  function openNewWard() {
+    setEditingWardId(null)
+    setWardForm(emptyWardForm)
+    setFormError(null)
+    setWardModalOpen(true)
+  }
+
+  function openEditWard(w: WardResponse) {
+    setEditingWardId(w.id)
+    setWardForm({ code: w.code, name: w.name, totalBeds: String(w.totalBeds) })
+    setFormError(null)
+    setWardModalOpen(true)
+  }
+
+  function openNewBed() {
+    setEditingBedId(null)
+    setBedForm(emptyBedForm)
+    setFormError(null)
+    setBedModalOpen(true)
+  }
+
+  function openEditBed(b: BedResponse) {
+    setEditingBedId(b.id)
+    setBedForm({ wardId: b.wardId, bedNumber: b.bedNumber, status: b.status })
+    setFormError(null)
+    setBedModalOpen(true)
+  }
 
   async function submitWard(e: FormEvent) {
     e.preventDefault()
@@ -44,15 +85,22 @@ export default function WardsBeds() {
     setSubmitting(true)
     setFormError(null)
     try {
-      await wardsApi.create(
-        { code: wardForm.code, name: wardForm.name, totalBeds: Number(wardForm.totalBeds) },
-        user.userId,
-      )
+      const payload = { code: wardForm.code, name: wardForm.name, totalBeds: Number(wardForm.totalBeds) }
+      if (editingWardId) {
+        await wardsApi.update({ id: editingWardId, ...payload }, user.userId)
+      } else {
+        await wardsApi.create(payload, user.userId)
+      }
       setWardModalOpen(false)
-      setWardForm({ code: '', name: '', totalBeds: '' })
       wards.reload()
-    } catch {
-      setFormError('Could not create the ward — the code may already be in use.')
+    } catch (err) {
+      setFormError(
+        describeApiError(err, {
+          409: editingWardId
+            ? 'Could not save these changes — the code may already be in use by another ward.'
+            : 'Could not create the ward — the code may already be in use.',
+        }),
+      )
     } finally {
       setSubmitting(false)
     }
@@ -64,15 +112,22 @@ export default function WardsBeds() {
     setSubmitting(true)
     setFormError(null)
     try {
-      await bedsApi.create(
-        { wardId: bedForm.wardId, bedNumber: bedForm.bedNumber, status: Number(bedForm.status) },
-        user.userId,
-      )
+      const payload = { wardId: bedForm.wardId, bedNumber: bedForm.bedNumber, status: Number(bedForm.status) }
+      if (editingBedId) {
+        await bedsApi.update({ id: editingBedId, ...payload }, user.userId)
+      } else {
+        await bedsApi.create(payload, user.userId)
+      }
       setBedModalOpen(false)
-      setBedForm({ wardId: '', bedNumber: '', status: 1 })
       beds.reload()
-    } catch {
-      setFormError('Could not create the bed — the bed number may already be in use.')
+    } catch (err) {
+      setFormError(
+        describeApiError(err, {
+          409: editingBedId
+            ? 'Could not save these changes — the bed number may already be in use by another bed.'
+            : 'Could not create the bed — the bed number may already be in use.',
+        }),
+      )
     } finally {
       setSubmitting(false)
     }
@@ -81,7 +136,29 @@ export default function WardsBeds() {
   const wardColumns: Column<WardResponse>[] = [
     { header: 'Code', render: (w) => <span className="font-semibold">{w.code}</span> },
     { header: 'Name', render: (w) => w.name },
-    { header: 'Beds', render: (w) => `${occupancyByWard.get(w.id)?.occupied ?? 0} / ${w.totalBeds}` },
+    {
+      header: 'Beds',
+      render: (w) => {
+        const c = countsByWard.get(w.id)
+        return `${c?.occupied ?? 0} / ${c?.actual ?? 0}`
+      },
+    },
+    ...(isAdmin
+      ? [
+          {
+            header: '',
+            render: (w: WardResponse) => (
+              <button
+                type="button"
+                onClick={() => openEditWard(w)}
+                className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-accent hover:bg-accent/10"
+              >
+                Edit
+              </button>
+            ),
+          } as Column<WardResponse>,
+        ]
+      : []),
   ]
 
   const bedColumns: Column<BedResponse>[] = [
@@ -94,16 +171,38 @@ export default function WardsBeds() {
         return <StatusPill label={label} tone={BED_STATUS_TONE[label] ?? 'neutral'} />
       },
     },
+    ...(isAdmin
+      ? [
+          {
+            header: '',
+            render: (b: BedResponse) => (
+              <button
+                type="button"
+                onClick={() => openEditBed(b)}
+                className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-accent hover:bg-accent/10"
+              >
+                Edit
+              </button>
+            ),
+          } as Column<BedResponse>,
+        ]
+      : []),
   ]
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-6">
       <PageHeader title="Wards & Beds" subtitle="Ward capacity and bed-level status across the unit" />
 
+      {!isAdmin && (
+        <p className="text-[12.5px] text-text-muted">
+          Only Admin accounts can add or edit wards and beds — everyone can still see live status here.
+        </p>
+      )}
+
       <Card className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <h2 className="text-[16px] font-semibold text-text">Wards</h2>
-          <PrimaryButton onClick={() => setWardModalOpen(true)}>+ New ward</PrimaryButton>
+          {isAdmin && <PrimaryButton onClick={openNewWard}>+ New ward</PrimaryButton>}
         </div>
         <DataTable
           columns={wardColumns}
@@ -119,9 +218,11 @@ export default function WardsBeds() {
       <Card className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <h2 className="text-[16px] font-semibold text-text">Beds</h2>
-          <PrimaryButton onClick={() => setBedModalOpen(true)} disabled={wards.data.length === 0}>
-            + New bed
-          </PrimaryButton>
+          {isAdmin && (
+            <PrimaryButton onClick={openNewBed} disabled={wards.data.length === 0}>
+              + New bed
+            </PrimaryButton>
+          )}
         </div>
         <DataTable
           columns={bedColumns}
@@ -134,7 +235,11 @@ export default function WardsBeds() {
         />
       </Card>
 
-      <Modal open={wardModalOpen} title="New ward" onClose={() => setWardModalOpen(false)}>
+      <Modal
+        open={wardModalOpen}
+        title={editingWardId ? 'Edit ward' : 'New ward'}
+        onClose={() => setWardModalOpen(false)}
+      >
         <form onSubmit={submitWard} className="flex flex-col gap-3.5">
           <Field label="Code (e.g. FW, MW, ICU)">
             <TextInput required value={wardForm.code} onChange={(e) => setWardForm({ ...wardForm, code: e.target.value })} />
@@ -142,7 +247,7 @@ export default function WardsBeds() {
           <Field label="Name">
             <TextInput required value={wardForm.name} onChange={(e) => setWardForm({ ...wardForm, name: e.target.value })} />
           </Field>
-          <Field label="Total beds">
+          <Field label="Planned capacity (reference only — the Beds count above always reflects actual beds added)">
             <TextInput
               type="number"
               min="1"
@@ -155,12 +260,12 @@ export default function WardsBeds() {
             <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{formError}</p>
           )}
           <PrimaryButton type="submit" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save ward'}
+            {submitting ? 'Saving…' : editingWardId ? 'Save changes' : 'Save ward'}
           </PrimaryButton>
         </form>
       </Modal>
 
-      <Modal open={bedModalOpen} title="New bed" onClose={() => setBedModalOpen(false)}>
+      <Modal open={bedModalOpen} title={editingBedId ? 'Edit bed' : 'New bed'} onClose={() => setBedModalOpen(false)}>
         <form onSubmit={submitBed} className="flex flex-col gap-3.5">
           <Field label="Ward">
             <Select
@@ -202,7 +307,7 @@ export default function WardsBeds() {
             <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{formError}</p>
           )}
           <PrimaryButton type="submit" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save bed'}
+            {submitting ? 'Saving…' : editingBedId ? 'Save changes' : 'Save bed'}
           </PrimaryButton>
         </form>
       </Modal>

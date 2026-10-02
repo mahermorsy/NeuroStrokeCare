@@ -5,7 +5,9 @@ import { useCountUp } from '@/hooks/useCountUp'
 import { useEntityList } from '@/hooks/useEntityList'
 import { entityApi } from '@/lib/entityApi'
 import { ClipboardPlusIcon, BedIcon, CheckSquareIcon, ClockIcon } from '@/components/icons'
+import StatusPill from '@/components/StatusPill'
 import { PATIENT_STATUS, riskTone } from '@/lib/enums'
+import { isOpenAdmission } from '@/lib/admissions'
 import type {
   AdmissionResponse,
   PatientResponse,
@@ -50,13 +52,6 @@ const REQUIRED_ASSESSMENTS: { key: string; label: string; relevantStrokeTypes: n
   { key: 'morse', label: 'Morse Fall Scale', relevantStrokeTypes: null },
 ]
 
-const STATUS_STYLES: Record<string, string> = {
-  success: 'bg-success-bg text-success',
-  critical: 'bg-critical-bg text-critical',
-  warning: 'bg-warning-bg text-warning',
-  info: 'bg-info-bg text-blue',
-}
-
 const ASSESSMENT_TONE_STYLES: Record<string, { bg: string; text: string }> = {
   critical: { bg: 'bg-critical-bg', text: 'text-critical' },
   warning: { bg: 'bg-warning-bg', text: 'text-warning' },
@@ -87,6 +82,7 @@ function StatTile({
   icon: Icon,
   iconBg,
   iconColor,
+  accent,
   note,
   noteColor,
 }: {
@@ -96,6 +92,11 @@ function StatTile({
   icon: (props: SVGProps<SVGSVGElement>) => ReactElement
   iconBg: string
   iconColor: string
+  /** Thin left-edge marker echoing the icon's tone — the same institutional
+   *  left-border pattern already used for the active sidebar item, not a
+   *  decorative top banner, so it reads as a quiet scan cue rather than a
+   *  SaaS-style card accent. */
+  accent: string
   note: string
   noteColor: string
 }) {
@@ -104,19 +105,24 @@ function StatTile({
     <motion.div
       variants={fadeUp}
       transition={{ duration: 0.4, ease: 'easeOut' }}
-      className="flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-5 shadow-[0_1px_2px_rgba(16,40,45,0.04)]"
+      className="relative flex min-h-[160px] flex-col gap-4 overflow-hidden rounded-2xl border border-border bg-surface p-5 pl-[23px] shadow-[0_1px_2px_rgba(10,25,48,0.06)]"
     >
+      <span className={`absolute inset-y-0 left-0 w-[3px] ${accent}`} aria-hidden="true" />
       <div className="flex items-center gap-2.5">
-        <span className={`flex h-[38px] w-[38px] items-center justify-center rounded-[10px] ${iconBg}`}>
+        <span className={`flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-[10px] ${iconBg}`}>
           <Icon className={`h-[19px] w-[19px] ${iconColor}`} />
         </span>
-        <span className="text-[12px] font-semibold uppercase tracking-wide text-text-secondary">{label}</span>
+        <span className="text-[11.5px] font-semibold uppercase tracking-wide text-text-secondary">{label}</span>
       </div>
-      <span className="text-[32px] font-bold leading-none text-text">
-        {count}
-        <span className="text-[18px] font-medium text-text-muted">{suffix}</span>
-      </span>
-      <span className={`text-[12.5px] font-semibold ${noteColor}`}>{note}</span>
+      {/* Pinned to the bottom of the card so the value lands in the same
+          place on every tile regardless of how long its note text runs. */}
+      <div className="mt-auto flex flex-col gap-1.5">
+        <span className="text-[34px] font-bold leading-none tracking-tight text-text">
+          {count}
+          <span className="ml-1 text-[16px] font-medium text-text-muted">{suffix}</span>
+        </span>
+        <span className={`text-[12.5px] font-semibold ${noteColor}`}>{note}</span>
+      </div>
     </motion.div>
   )
 }
@@ -136,8 +142,24 @@ export default function Dashboard() {
   const guss = useEntityList(() => gussApi.list())
   const morse = useEntityList(() => morseApi.list())
 
+  // Phase F1 - Frontend Hardening (Section 13): this previously omitted aspects/ich/tia/braden/
+  // gcs/guss/morse, so "Nothing pending — all caught up" (and the other empty-state messages
+  // below) could render for a moment while 7 of the 8 assessment-type fetches this page depends
+  // on were still in flight — a false "all clear" rather than an honest loading state.
   const loading =
-    admissions.loading || patients.loading || wards.loading || beds.loading || doorTimings.loading || nihss.loading
+    admissions.loading ||
+    patients.loading ||
+    wards.loading ||
+    beds.loading ||
+    doorTimings.loading ||
+    nihss.loading ||
+    aspects.loading ||
+    ich.loading ||
+    tia.loading ||
+    braden.loading ||
+    gcs.loading ||
+    guss.loading ||
+    morse.loading
 
   const view = useMemo(() => {
     const patientById = new Map(patients.data.map((p) => [p.id, p]))
@@ -161,7 +183,7 @@ export default function Dashboard() {
     })
 
     const activeAdmissions = admissions.data
-      .filter((a) => !a.dischargeTime)
+      .filter(isOpenAdmission)
       .sort((a, b) => new Date(b.admissionTime).getTime() - new Date(a.admissionTime).getTime())
 
     const admittedLast24h = activeAdmissions.filter(
@@ -256,6 +278,7 @@ export default function Dashboard() {
       icon: ClipboardPlusIcon,
       iconBg: 'bg-accent/10',
       iconColor: 'text-accent',
+      accent: 'bg-accent',
       note: `${view.admittedLast24h} admitted in the last 24h`,
       noteColor: 'text-success',
     },
@@ -267,6 +290,7 @@ export default function Dashboard() {
       icon: BedIcon,
       iconBg: 'bg-blue/10',
       iconColor: 'text-blue',
+      accent: 'bg-blue',
       note: `open across ${view.wardsWithVacancy} ward${view.wardsWithVacancy === 1 ? '' : 's'}`,
       noteColor: 'text-text-muted',
     },
@@ -278,6 +302,7 @@ export default function Dashboard() {
       icon: CheckSquareIcon,
       iconBg: 'bg-warning/15',
       iconColor: 'text-warning',
+      accent: 'bg-warning',
       note: `${view.urgentCount} pending > 30 min`,
       noteColor: 'text-warning',
     },
@@ -289,6 +314,7 @@ export default function Dashboard() {
       icon: ClockIcon,
       iconBg: 'bg-success/10',
       iconColor: 'text-success',
+      accent: 'bg-success',
       note: view.avgDoorToNeedle === null ? 'No needle-time data yet' : 'Target: ≤ 60 min',
       noteColor: 'text-success',
     },
@@ -299,50 +325,65 @@ export default function Dashboard() {
       <motion.div
         variants={fadeUp}
         transition={{ duration: 0.4, ease: 'easeOut' }}
-        className="flex flex-wrap items-start justify-between gap-5"
+        className="flex flex-col gap-3.5"
       >
-        <div>
-          <h1 className="font-display text-[22px] font-semibold text-text sm:text-[28px]">Dashboard</h1>
-          <p className="mt-1.5 text-[14px] text-text-secondary">
-            Stroke unit overview ·{' '}
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-5">
+          <div className="flex flex-col gap-1.5">
+            <h1 className="font-display text-[20px] font-semibold leading-tight text-text sm:text-[26px]">
+              Dashboard
+            </h1>
+            <p className="text-[14px] text-text-secondary">Stroke unit overview</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Link
+              to="/admissions"
+              className="rounded-lg border border-border bg-surface px-4 py-2.5 text-[13.5px] font-semibold text-text-secondary transition-colors duration-150 hover:bg-border-soft hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
+            >
+              View admissions
+            </Link>
+            <Link
+              to="/admissions"
+              className="rounded-lg bg-accent px-4 py-2.5 text-[13.5px] font-semibold text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
+            >
+              + New admission
+            </Link>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-2 text-[13px] text-text-secondary">
-            <span className="h-2 w-2 rounded-full bg-success" />
-            Live data
+
+        {/* A quieter context row, separated from the two real actions above
+            so they read as the primary choices — not competing with a
+            status indicator for attention. Same date that was already
+            shown, just given its own, more deliberate presentation. */}
+        <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-text-muted">
+          <span className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden="true" />
+            <span className="font-medium text-text-secondary">Current data</span>
           </span>
-          <Link
-            to="/admissions"
-            className="rounded-lg border border-border bg-surface px-4 py-2.5 text-[13.5px] font-semibold text-text"
-          >
-            View reports
-          </Link>
-          <Link
-            to="/admissions"
-            className="rounded-lg bg-accent px-4 py-2.5 text-[13.5px] font-semibold text-white"
-          >
-            + New admission
-          </Link>
+          <span aria-hidden="true">·</span>
+          <span>
+            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+          </span>
         </div>
       </motion.div>
 
-      <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2 lg:grid-cols-4">
         {stats.map(({ key, ...stat }) => (
           <StatTile key={key} {...stat} />
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-[18px] xl:grid-cols-[1.7fr_1fr]">
+      <div className="grid grid-cols-1 gap-[18px] lg:grid-cols-[1.7fr_1fr]">
         <motion.div
           variants={fadeUp}
           transition={{ duration: 0.4, ease: 'easeOut' }}
-          className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-[0_1px_2px_rgba(16,40,45,0.04)]"
+          className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-[0_1px_2px_rgba(10,25,48,0.06)]"
         >
           <div className="flex items-center justify-between">
             <h2 className="text-[16px] font-semibold text-text">Active Admissions</h2>
-            <Link to="/admissions" className="text-[13px] font-semibold text-accent hover:underline">
+            <Link
+              to="/admissions"
+              className="rounded-sm text-[13px] font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
               View all
             </Link>
           </div>
@@ -353,6 +394,7 @@ export default function Dashboard() {
                   {['Patient', 'Ward / Bed', 'Admitted', 'NIHSS', 'Status'].map((h) => (
                     <th
                       key={h}
+                      scope="col"
                       className="border-b border-border px-2.5 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-text-muted"
                     >
                       {h}
@@ -375,11 +417,7 @@ export default function Dashboard() {
                     <td className="px-2.5 py-3.5 text-[13.5px] text-text-secondary">{row.time}</td>
                     <td className="px-2.5 py-3.5 text-[13.5px] text-text-secondary">{row.nihss}</td>
                     <td className="px-2.5 py-3.5">
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${STATUS_STYLES[row.tone]}`}
-                      >
-                        {row.statusLabel}
-                      </span>
+                      <StatusPill label={row.statusLabel} tone={row.tone} />
                     </td>
                   </tr>
                 ))}
@@ -391,7 +429,7 @@ export default function Dashboard() {
         <motion.div
           variants={fadeUp}
           transition={{ duration: 0.4, ease: 'easeOut' }}
-          className="flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-[22px] shadow-[0_1px_2px_rgba(16,40,45,0.04)]"
+          className="flex flex-col gap-3.5 rounded-2xl border border-border bg-surface p-[22px] shadow-[0_1px_2px_rgba(10,25,48,0.06)]"
         >
           <div className="flex items-center justify-between">
             <h2 className="text-[16px] font-semibold text-text">Pending Assessments</h2>
@@ -409,14 +447,19 @@ export default function Dashboard() {
                 <Link
                   key={`${item.admissionId}-${item.label}-${i}`}
                   to={`/report/${item.admissionId}`}
-                  className={`flex items-center justify-between gap-2.5 rounded-[10px] px-3.5 py-3 ${tone.bg}`}
+                  className={`group flex items-center justify-between gap-2.5 rounded-[10px] px-3.5 py-3 transition-[filter] duration-150 hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${tone.bg}`}
                 >
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[13.5px] font-semibold text-text">{item.patientName}</span>
                     <span className="text-[12px] text-text-secondary">{item.label}</span>
                   </div>
-                  <span className={`whitespace-nowrap text-[12px] font-bold ${tone.text}`}>
-                    {Math.round(item.minutesSince)} min since admission
+                  <span className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span className={`text-[12px] font-bold ${tone.text}`}>
+                      {Math.round(item.minutesSince)} min since admission
+                    </span>
+                    <span className="text-text-muted transition-transform duration-150 group-hover:translate-x-0.5" aria-hidden="true">
+                      ›
+                    </span>
                   </span>
                 </Link>
               )
@@ -428,15 +471,18 @@ export default function Dashboard() {
       <motion.div
         variants={fadeUp}
         transition={{ duration: 0.4, ease: 'easeOut' }}
-        className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-[0_1px_2px_rgba(16,40,45,0.04)]"
+        className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 shadow-[0_1px_2px_rgba(10,25,48,0.06)]"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-[16px] font-semibold text-text">Wards & Beds Occupancy</h2>
-          <Link to="/wards" className="text-[13px] font-semibold text-accent hover:underline">
+          <Link
+            to="/wards"
+            className="rounded-sm text-[13px] font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          >
             Manage wards
           </Link>
         </div>
-        <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-6">
           {view.wardOccupancy.length === 0 && !loading && (
             <p className="col-span-full text-[13px] text-text-muted">No wards configured yet.</p>
           )}

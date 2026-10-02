@@ -51,7 +51,8 @@ namespace NeuroStrokeCare.Service.Auth
                 FirstName = request.FirstName.Trim(),
                 LastName = request.LastName.Trim(),
                 PhoneNumber = request.PhoneNumber?.Trim(),
-                IsApproved = true
+                IsApproved = true,
+                EmployeeId = string.IsNullOrWhiteSpace(request.EmployeeId) ? null : request.EmployeeId.Trim()
             };
 
             var createResult = await _userManager.CreateAsync(user, request.Password);
@@ -228,7 +229,9 @@ namespace NeuroStrokeCare.Service.Auth
                     PhoneNumber = user.PhoneNumber,
                     Role = roles.FirstOrDefault() ?? "Staff",
                     IsRootSuperAdmin = user.IsRootSuperAdmin,
-                    CreatedAt = user.CreatedAt
+                    CreatedAt = user.CreatedAt,
+                    EmployeeId = user.EmployeeId,
+                    ProfilePhotoUrl = user.ProfilePhotoUrl
                 });
             }
 
@@ -294,7 +297,7 @@ namespace NeuroStrokeCare.Service.Auth
             }).ToList();
         }
 
-        public async Task<AuthResponse> ApproveUserAsync(Guid userId, string role)
+        public async Task<AuthResponse> ApproveUserAsync(Guid userId, string role, string? employeeId = null)
         {
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null || user.IsDeleted)
@@ -314,6 +317,8 @@ namespace NeuroStrokeCare.Service.Auth
             await _userManager.AddToRoleAsync(user, trimmedRole);
 
             user.IsApproved = true;
+            if (!string.IsNullOrWhiteSpace(employeeId))
+                user.EmployeeId = employeeId.Trim();
             await _userManager.UpdateAsync(user);
 
             return new AuthResponse { Success = true, Message = "تم قبول الحساب وتفعيله" };
@@ -331,6 +336,69 @@ namespace NeuroStrokeCare.Service.Auth
             await _userManager.UpdateAsync(user);
 
             return new AuthResponse { Success = true, Message = "تم رفض الطلب" };
+        }
+
+        public async Task<UserSummaryResponse?> GetMyProfileAsync(Guid userId)
+        {
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null || user.IsDeleted)
+                return null;
+
+            var roles = await _userManager.GetRolesAsync(user);
+            return new UserSummaryResponse
+            {
+                Id = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                Email = user.Email ?? string.Empty,
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                PhoneNumber = user.PhoneNumber,
+                Role = roles.FirstOrDefault() ?? "Staff",
+                IsRootSuperAdmin = user.IsRootSuperAdmin,
+                CreatedAt = user.CreatedAt,
+                EmployeeId = user.EmployeeId,
+                ProfilePhotoUrl = user.ProfilePhotoUrl
+            };
+        }
+
+        public async Task<AuthResponse> UpdateUserAdminAsync(Guid userId, string? role, string? employeeId)
+        {
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null || user.IsDeleted)
+                return new AuthResponse { Success = false, Message = "المستخدم غير موجود" };
+
+            if (!string.IsNullOrWhiteSpace(role))
+            {
+                var trimmedRole = role.Trim();
+                if (!await _roleManager.RoleExistsAsync(trimmedRole))
+                    await _roleManager.CreateAsync(new IdentityRole<Guid>(trimmedRole));
+
+                var existingRoles = await _userManager.GetRolesAsync(user);
+                if (existingRoles.Count > 0)
+                    await _userManager.RemoveFromRolesAsync(user, existingRoles);
+
+                await _userManager.AddToRoleAsync(user, trimmedRole);
+            }
+
+            // employeeId ماينفعش يتفضى بعد ما يتحدد - بس ممكن يتغير أو يتحدد لأول مرة
+            if (employeeId != null)
+                user.EmployeeId = string.IsNullOrWhiteSpace(employeeId) ? null : employeeId.Trim();
+
+            await _userManager.UpdateAsync(user);
+
+            return new AuthResponse { Success = true, Message = "تم تحديث بيانات الموظف" };
+        }
+
+        public async Task<AuthResponse> SetProfilePhotoAsync(Guid userId, string photoUrl)
+        {
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            if (user == null || user.IsDeleted)
+                return new AuthResponse { Success = false, Message = "المستخدم غير موجود" };
+
+            user.ProfilePhotoUrl = photoUrl;
+            await _userManager.UpdateAsync(user);
+
+            return new AuthResponse { Success = true, Message = "تم تحديث الصورة الشخصية", UserId = user.Id };
         }
 
         #endregion

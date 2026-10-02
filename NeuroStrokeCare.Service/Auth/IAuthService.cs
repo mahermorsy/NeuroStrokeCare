@@ -14,7 +14,11 @@ namespace NeuroStrokeCare.Service.Auth
 
         Task<AuthResponse> RegisterRequestAsync(SelfRegisterRequest request);
         Task<List<PendingUserResponse>> GetPendingUsersAsync();
-        Task<AuthResponse> ApproveUserAsync(Guid userId, string role);
+        Task<AuthResponse> ApproveUserAsync(Guid userId, string role, string? employeeId = null);
         Task<AuthResponse> RejectUserAsync(Guid userId);
+
+        Task<UserSummaryResponse?> GetMyProfileAsync(Guid userId);
+        Task<AuthResponse> UpdateUserAdminAsync(Guid userId, string? role, string? employeeId);
+        Task<AuthResponse> SetProfilePhotoAsync(Guid userId, string photoUrl);
     }
 }

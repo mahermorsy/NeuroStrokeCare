@@ -4,30 +4,39 @@
   --font-display: "Newsreader", Georgia, serif;
   --font-body: "Public Sans", system-ui, sans-serif;
 
-  --color-bg: #f3f7f8;
+  /* Navy + gold: a deliberately more formal, "institutional" palette —
+     deep navy for structure (sidebar, headings, primary actions) with gold
+     used sparingly as a highlight (active states, dividers, the ID card)
+     rather than painted across every button, so it still reads as clinical
+     software and not a marketing site. */
+  --color-bg: #f5f4ef;
   --color-surface: #ffffff;
-  --color-border: #e1e8ea;
-  --color-border-soft: #eef2f3;
+  --color-border: #e3e1d7;
+  --color-border-soft: #eeede5;
 
-  --color-sidebar: #0e3b45;
-  --color-sidebar-text: #c9dde1;
-  --color-sidebar-muted: #7fa0a6;
+  --color-sidebar: #0a1930;
+  --color-sidebar-text: #c7d2e3;
+  --color-sidebar-muted: #6d7fa1;
 
-  --color-accent: #1b8a94;
-  --color-accent-dark: #0f6169;
+  --color-accent: #1c3f66;
+  --color-accent-dark: #122a47;
   --color-blue: #2d6e9e;
 
-  --color-text: #16262b;
-  --color-text-secondary: #5c7278;
-  --color-text-muted: #8aa0a6;
+  --color-gold: #b3882c;
+  --color-gold-dark: #8c6a20;
+  --color-gold-bg: #f7eed9;
+
+  --color-text: #1a2230;
+  --color-text-secondary: #5a6475;
+  --color-text-muted: #8990a0;
 
   --color-success: #2e9e64;
   --color-success-bg: #e6f4ec;
   --color-warning: #c98a1b;
   --color-warning-bg: #fbf0dd;
-  --color-critical: #c74b4b;
+  --color-critical: #b03a3a;
   --color-critical-bg: #fbeaea;
-  --color-info-bg: #e9f3f5;
+  --color-info-bg: #e9eef5;
 }
 
 body {
