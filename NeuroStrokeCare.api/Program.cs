@@ -2,9 +2,11 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using NeuroStrokeCare.api.OpenApi;
 using NeuroStrokeCare.Core;
+using NeuroStrokeCare.Data.Exceptions;
 using NeuroStrokeCare.Data.UserApplication;
 using NeuroStrokeCare.infrastructure;
 using NeuroStrokeCare.Service;
@@ -131,19 +133,60 @@ if (app.Environment.IsProduction())
 }
 
 // معالجة موحّدة لأي Exception غير متوقعة (زي DataAccessException) بدل ما تطلع Stack Trace خام للـ Client
+//
+// FINAL RELEASE-CANDIDATE PASS (sections 1(f), 4, 8): before this, EVERY unhandled exception -
+// no matter what actually went wrong underneath - fell through to the exact same flat 500.
+// ErrorBehaviorTests.Admission_ChangeStatus_OnNonExistentId_Returns500NotFriendly404 caught
+// this concretely: ChangeStatus on a missing id throws a plain KeyNotFoundException, but the
+// generic repository (TableRepository.cs) wraps *every* exception it catches - a genuine
+// "not found", a genuine optimistic-concurrency conflict (DbUpdateConcurrencyException, see
+// the new Admission.RowVersion concurrency token), anything - into the same DataAccessException
+// type, so the real exception to branch on is usually one level down, in .InnerException, not
+// the outer DataAccessException itself. Only a short, explicit allow-list of KNOWN, safe-to-
+// expose domain failures gets its own status code below; anything not on that list still falls
+// through to the original flat 500 (detail hidden outside Development) exactly as before - this
+// deliberately does not try to guess a status code for every possible exception type.
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
     {
-        context.Response.ContentType = "application/json";
-        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-
         var exceptionFeature = context.Features.Get<IExceptionHandlerFeature>();
         var exception = exceptionFeature?.Error;
 
+        var toInspect = exception is DataAccessException dataAccessEx && dataAccessEx.InnerException != null
+            ? dataAccessEx.InnerException
+            : exception;
+
+        int statusCode;
+        string message;
+        switch (toInspect)
+        {
+            // GenericRepository.ChangeStatus throws this directly (not a sentinel) when the id
+            // doesn't exist - was previously indistinguishable from a real server error.
+            case KeyNotFoundException:
+                statusCode = StatusCodes.Status404NotFound;
+                message = "The requested resource was not found.";
+                break;
+
+            // Thrown by SaveChangesAsync when Admission.RowVersion no longer matches what this
+            // request read - someone else updated the same admission in the meantime.
+            case DbUpdateConcurrencyException:
+                statusCode = StatusCodes.Status409Conflict;
+                message = "This record was changed by someone else since it was loaded. Reload and try again.";
+                break;
+
+            default:
+                statusCode = StatusCodes.Status500InternalServerError;
+                message = "حصل خطأ غير متوقع أثناء تنفيذ الطلب.";
+                break;
+        }
+
+        context.Response.ContentType = "application/json";
+        context.Response.StatusCode = statusCode;
+
         await context.Response.WriteAsJsonAsync(new
         {
-            error = "حصل خطأ غير متوقع أثناء تنفيذ الطلب.",
+            error = message,
             details = app.Environment.IsDevelopment() ? exception?.Message : null
         });
     });

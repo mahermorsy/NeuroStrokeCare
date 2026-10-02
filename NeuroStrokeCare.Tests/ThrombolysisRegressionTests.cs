@@ -62,26 +62,29 @@ namespace NeuroStrokeCare.Tests
         }
 
         // ============================================================================
-        // CRITICAL (spec explicitly called this out): does a normal Admission PUT erase
-        // the thrombolysis fields it never mentions?
-        //
-        // Root cause, traced through the real source:
+        // CRITICAL (spec explicitly called this out) - CONFIRMED AND FIXED in the FINAL
+        // RELEASE-CANDIDATE PASS. Root cause, traced through the real source:
         //   - UpdateAdmissionRequest (Core/Features/Admission/Dtos/UpdateAdmissionRequest.cs)
         //     has NO ThrombolysisGivenAt/ThrombolysisDrug/ThrombolysisDoseMg/
         //     ThrombolysisRecordedById properties at all.
-        //   - AdmissionProfile's `CreateMap<UpdateAdmissionRequest, Admission>()` has no
-        //     .ForMember(...).Ignore() for those fields, so AutoMapper leaves them at the
-        //     CLR default (null) on the freshly-`new Admission()`-mapped object.
+        //   - AdmissionProfile's CreateMap<UpdateAdmissionRequest, Admission>() has no
+        //     .ForMember(...).Ignore() for those fields, so AutoMapper left them at the CLR
+        //     default (null) on the freshly-mapped object.
         //   - TableRepository.UpdateAsync only copies CreatedAt/CreatedBy/CurrentState over
-        //     from the existing DB row before calling `_dbSet.Update(entity)` (a full-entity
-        //     update) - it does NOT copy the four Thrombolysis* fields forward.
-        // Net effect: PUT /api/admission on an admission that already has thrombolysis
-        // recorded WIPES that treatment record back to null, silently, with no error.
+        //     from the existing DB row before calling _dbSet.Update(entity) (a full-entity
+        //     update) - it did NOT copy the four Thrombolysis* fields forward.
+        // Net effect (before the fix): PUT /api/admission on an admission that already has
+        // thrombolysis recorded WIPED that treatment record back to null, silently, with no
+        // error.
         //
-        // This test asserts the CORRECT behavior (fields survive a PUT) and is expected to
-        // FAIL on the current code - that failure *is* the deliverable here. Do not
-        // "fix" this test to match the bug; fix AdmissionProfile/UpdateAdmissionRequest (or
-        // AdmissionController.Update) instead, then this test should start passing.
+        // FIX APPLIED: AdmissionController.Update now explicitly restores all four
+        // Thrombolysis* fields (and, for the same reason, StrokeType/StrokeTypeSetAt/
+        // StrokeTypeSetById) from the pre-update `current` row immediately after the
+        // AutoMapper call, the same way it already restored AdmittedById - so this PUT can
+        // never touch fields that have their own dedicated, audited commands
+        // (/thrombolysis, /stroke-type). This test now asserts the fix held and is expected
+        // to PASS; if it ever starts failing again, the fix in AdmissionController.Update was
+        // reverted or weakened.
         // ============================================================================
         [Fact]
         public async Task NormalAdmissionPut_DoesNotEraseThrombolysisFields()

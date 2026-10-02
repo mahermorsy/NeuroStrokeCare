@@ -36,9 +36,25 @@ export const usersApi = {
   approve: (id: string, role: string, employeeId?: string) =>
     api.post(`/Auth/approve/${id}`, null, { params: { role, employeeId } }).then((r) => r.data),
   reject: (id: string) => api.post(`/Auth/reject/${id}`).then((r) => r.data),
-  updateAdmin: (id: string, payload: { role?: string; employeeId?: string }) =>
-    api.put<AuthResponse>(`/Auth/users/${id}`, payload).then((r) => r.data),
+  updateAdmin: (
+    id: string,
+    payload: {
+      role?: string
+      employeeId?: string
+      profession?: string
+      jobTitle?: string
+      academicDegree?: string
+      department?: string
+    },
+  ) => api.put<AuthResponse>(`/Auth/users/${id}`, payload).then((r) => r.data),
   myProfile: () => api.get<UserSummaryResponse>('/Auth/profile').then((r) => r.data),
+  // Self-service edit of the user's own non-privileged fields only (FirstName/LastName/
+  // Email/PhoneNumber) - rides the existing PUT /api/auth/profile endpoint, whose
+  // UpdateProfileRequest DTO deliberately has no Role/EmployeeId/Profession/JobTitle/
+  // AcademicDegree/Department fields, so this can never touch privileged employment data
+  // (ADDITIONAL CLINICAL UX & STAFF PROFILE TASKS, area 4).
+  updateProfile: (payload: { firstName: string; lastName: string; email: string; phoneNumber?: string }) =>
+    api.put<AuthResponse>('/Auth/profile', payload).then((r) => r.data),
   // Authenticated change-password, for a signed-in user who knows their
   // current password — distinct from the forgot/reset-password flow, which
   // stays for the "I can't log in at all" case.

@@ -11,6 +11,7 @@ import Modal from '@/components/Modal'
 import { Field, Select, TextInput } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
 import { isOpenAdmission } from '@/lib/admissions'
+import { usePatientSelection } from '@/context/PatientSelectionContext'
 
 const doorTimingApi = entityApi<DoorTimingResponse>('DoorTiming')
 const admissionsApi = entityApi<AdmissionResponse>('Admission')
@@ -28,7 +29,17 @@ function toLocalInputValue(d: Date) {
 export default function DoorTiming() {
   const { user } = useAuth()
   const { data, loading, error, reload } = useEntityList(() => doorTimingApi.list())
-  const { patientNameByAdmissionId, loading: contextLoading, error: contextError, reload: reloadContext } = useAdmissionContext()
+  const {
+    patientNameByAdmissionId,
+    hospitalNumberByAdmissionId,
+    loading: contextLoading,
+    error: contextError,
+    reload: reloadContext,
+  } = useAdmissionContext()
+  // PHASE 11 (area 5): "Patient Selection Context" (not useAdmissionContext above, a
+  // differently-named, unrelated id-lookup hook - see PatientSelectionContext.tsx's header
+  // comment for why they're named apart).
+  const { admissionId: contextAdmissionId } = usePatientSelection()
   const admissions = useEntityList(() => admissionsApi.list())
 
   const [activateOpen, setActivateOpen] = useState(false)
@@ -36,6 +47,11 @@ export default function DoorTiming() {
   const [activateArrival, setActivateArrival] = useState(() => toLocalInputValue(new Date()))
   const [activateBusy, setActivateBusy] = useState(false)
   const [activateError, setActivateError] = useState<string | null>(null)
+  // ADDITIONAL CLINICAL UX & STAFF PROFILE TASKS (area 6): an explicit confirmation step
+  // before activation, on top of the duplicate-prevention already in admissionsWithoutOpenCode
+  // below - this is the "require confirmation" requirement, kept as a plain checkbox rather
+  // than a second modal/dialog so it doesn't add new UI infrastructure.
+  const [activateConfirmed, setActivateConfirmed] = useState(false)
 
   const [busyKey, setBusyKey] = useState<string | null>(null)
   // Phase F1 - Frontend Hardening (Section 13/14): recordMilestone/standDown previously had no
@@ -61,10 +77,29 @@ export default function DoorTiming() {
       .sort((a, b) => new Date(b.admissionTime).getTime() - new Date(a.admissionTime).getTime())
   }, [admissions.data, data])
 
+  // PHASE 11 (area 5): "if global context points to an ineligible admission, show a clear
+  // explanation and do not allow an invalid write" - this never overrides
+  // admissionsWithoutOpenCode (the one safety rule that decides what's selectable); it only
+  // decides whether to pre-fill the activation form from context, and if it can't, why not.
+  const contextEligible = useMemo(
+    () => Boolean(contextAdmissionId) && admissionsWithoutOpenCode.some((a) => a.id === contextAdmissionId),
+    [contextAdmissionId, admissionsWithoutOpenCode],
+  )
+
+  const contextIneligibleReason = useMemo(() => {
+    if (!contextAdmissionId || contextEligible) return null
+    const admission = admissions.data.find((a) => a.id === contextAdmissionId)
+    if (!admission) return null // not loaded yet, or genuinely not found - say nothing rather than guess
+    if (!isOpenAdmission(admission)) return 'that patient has already been discharged'
+    if (data.some((d) => d.admissionId === contextAdmissionId)) return 'that patient already has an active stroke code'
+    return 'that admission is not eligible for a new stroke code right now'
+  }, [contextAdmissionId, contextEligible, admissions.data, data])
+
   function openActivate() {
-    setActivateAdmissionId('')
+    setActivateAdmissionId(contextEligible ? (contextAdmissionId as string) : '')
     setActivateArrival(toLocalInputValue(new Date()))
     setActivateError(null)
+    setActivateConfirmed(false)
     setActivateOpen(true)
   }
 
@@ -74,7 +109,7 @@ export default function DoorTiming() {
     // Enter could otherwise fire two concurrent activations for the same admission before the
     // disabled-button re-render lands.
     if (activateBusy) return
-    if (!user?.userId || !activateAdmissionId) return
+    if (!user?.userId || !activateAdmissionId || !activateConfirmed) return
     setActivateBusy(true)
     setActivateError(null)
     try {
@@ -173,7 +208,19 @@ export default function DoorTiming() {
   }
 
   const columns: Column<DoorTimingResponse>[] = [
-    { header: 'Patient', render: (r) => patientNameByAdmissionId.get(r.admissionId) ?? '—' },
+    {
+      header: 'Patient',
+      render: (r) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-text">{patientNameByAdmissionId.get(r.admissionId) ?? '—'}</span>
+          <span className="text-[11.5px] text-text-muted">
+            {hospitalNumberByAdmissionId.get(r.admissionId)
+              ? `Hospital No. ${hospitalNumberByAdmissionId.get(r.admissionId)}`
+              : 'No hospital number assigned'}
+          </span>
+        </div>
+      ),
+    },
     { header: 'ER arrival', render: (r) => new Date(r.er_StrokeArrival).toLocaleString() },
     {
       header: 'Door-to-CT',
@@ -249,7 +296,8 @@ export default function DoorTiming() {
               </option>
               {admissionsWithoutOpenCode.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {patientNameByAdmissionId.get(a.id) ?? 'Unknown patient'} —{' '}
+                  {patientNameByAdmissionId.get(a.id) ?? 'Unknown patient'}
+                  {hospitalNumberByAdmissionId.get(a.id) ? ` (Hospital No. ${hospitalNumberByAdmissionId.get(a.id)})` : ''} —{' '}
                   {new Date(a.admissionTime).toLocaleString()}
                 </option>
               ))}
@@ -259,6 +307,12 @@ export default function DoorTiming() {
             <p className="text-[12.5px] text-text-muted">
               No admitted patient is available to activate — every current admission already has an open stroke
               code, or there are no active admissions yet.
+            </p>
+          )}
+          {contextIneligibleReason && !activateAdmissionId && (
+            <p className="rounded-lg bg-warning-bg px-3 py-2 text-[12.5px] font-medium text-warning">
+              The patient currently selected in your Patient Context can&apos;t be used for a new stroke code
+              activation right now — {contextIneligibleReason}. Choose a different admission below instead.
             </p>
           )}
           <Field label="ER / stroke arrival time">
@@ -273,12 +327,34 @@ export default function DoorTiming() {
             This starts the Door-to-CT (target ≤ 25 min) and Door-to-needle (target ≤ 60 min) clocks for this case,
             and surfaces it as a live alert to the whole team if either window is missed.
           </p>
+          <label className="flex items-start gap-2.5 rounded-lg border border-border-subtle bg-surface px-3 py-2.5 text-[12.5px] font-medium text-text-secondary">
+            <input
+              type="checkbox"
+              checked={activateConfirmed}
+              onChange={(e) => setActivateConfirmed(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            />
+            <span>
+              I confirm I want to activate a stroke code for{' '}
+              {activateAdmissionId ? (
+                <>
+                  {patientNameByAdmissionId.get(activateAdmissionId) ?? 'this patient'}
+                  {hospitalNumberByAdmissionId.get(activateAdmissionId)
+                    ? ` (Hospital No. ${hospitalNumberByAdmissionId.get(activateAdmissionId)})`
+                    : ''}
+                </>
+              ) : (
+                'this admission'
+              )}{' '}
+              now.
+            </span>
+          </label>
           {activateError && (
             <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">
               {activateError}
             </p>
           )}
-          <PrimaryButton type="submit" disabled={activateBusy || !activateAdmissionId}>
+          <PrimaryButton type="submit" disabled={activateBusy || !activateAdmissionId || !activateConfirmed}>
             {activateBusy ? 'Activating…' : 'Activate'}
           </PrimaryButton>
         </form>

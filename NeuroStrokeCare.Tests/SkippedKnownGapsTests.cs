@@ -4,32 +4,33 @@ namespace NeuroStrokeCare.Tests
 {
     // Spec areas 6 ("Decimal precision") and 11 ("Concurrency") explicitly instruct: if the
     // underlying feature isn't actually there, report it instead of inventing a passing test.
-    // These two are left here, visibly skipped with the exact reasoning, so they surface in
-    // every `dotnet test` run until someone either implements the feature (and deletes the
-    // Skip) or formally decides not to.
+    // Both gaps below were real as of Phase 11 and are now RESOLVED in the FINAL RELEASE-
+    // CANDIDATE PASS - kept here (Skip left in place, reasoning updated) as a historical record
+    // of what was actually checked and when, rather than deleted outright.
     public class SkippedKnownGapsTests
     {
         [Fact(Skip =
-            "DECIMAL PRECISION: grepped NeuroFlowDbContext.OnModelCreating (infrastructure/Context) " +
-            "for HasPrecision/[Precision]/TypeName across the whole solution - none exist anywhere. " +
-            "The migration named '20261001205915_FixDecimalPrecision' was also inspected directly: " +
-            "its Up()/Down() only add AspNetUsers.EmployeeId/ProfilePhotoUrl and recreate the " +
-            "Admissions.PatientId filtered unique index - it does not touch decimal precision at " +
-            "all, despite its name. Conclusion: decimal precision was never actually configured; " +
-            "all `decimal`/`decimal?` columns (LabResults' 13 fields, ThrombolysisDoseMg, " +
-            "Patient.WeightKg) use whatever default precision/scale the provider picks. A prior " +
-            "phase report's claim that precision rules exist for these fields does not match the " +
-            "repository. Do not test rules that were never implemented.")]
+            "DECIMAL PRECISION: RESOLVED in the FINAL RELEASE-CANDIDATE PASS. " +
+            "NeuroFlowDbContext.OnModelCreating now calls HasPrecision(...) explicitly for all 15 " +
+            "fields the spec listed (Patient.WeightKg, Admission.ThrombolysisDoseMg, " +
+            "ICHAssessment.ICHVolumeMl, and LabResults' 13 fields) - see DecimalPrecisionModelTests " +
+            "for model-metadata assertions covering each one. This does NOT yet mean the real " +
+            "database column types have changed - no `dotnet ef migrations add` was run (no dotnet " +
+            "available in this sandbox; see FINAL_RELEASE_CANDIDATE_REPORT.md for the exact migration " +
+            "the user must generate and apply on their own machine). The original finding (no " +
+            "precision configured anywhere, despite an earlier phase report's claim that it existed) " +
+            "is left here for the historical record.")]
         public void DecimalPrecision_NotConfigured_ReportedAsGap() { }
 
         [Fact(Skip =
-            "CONCURRENCY: Admission.cs (Data/Entities/Admission.cs) has no RowVersion/Timestamp " +
-            "property, and NeuroFlowDbContext.OnModelCreating has no IsRowVersion()/[ConcurrencyCheck] " +
-            "anywhere for Admission or any other entity. EF Core's generated UPDATE statements have " +
-            "no optimistic-concurrency WHERE clause, so a 'stale write' scenario cannot currently " +
-            "produce a 409 - the second writer simply wins silently. A prior phase report's claim " +
-            "that optimistic concurrency (stale-write -> 409) was implemented does not match the " +
-            "repository. Do not fabricate a RowVersion merely to make this test pass.")]
+            "CONCURRENCY: RESOLVED in the FINAL RELEASE-CANDIDATE PASS. Admission now has a " +
+            "RowVersion byte[] concurrency token (IsConcurrencyToken() in OnModelCreating, stamped " +
+            "with a fresh value on every insert/update by NeuroFlowDbContext.ApplyAdmissionRowVersionStamps), " +
+            "and Program.cs's exception handler maps DbUpdateConcurrencyException (unwrapped from " +
+            "DataAccessException where applicable) to 409. See AdmissionConcurrencyTests for a real " +
+            "stale-write -> 409 regression test. The original finding (no RowVersion/concurrency " +
+            "token anywhere, despite an earlier phase report's claim that it existed) is left here " +
+            "for the historical record.")]
         public void Concurrency_RowVersionNotImplemented_ReportedAsGap() { }
     }
 }

@@ -8,6 +8,11 @@ namespace NeuroStrokeCare.Core.Features.Patient.Dtos
         [StringLength(20, ErrorMessage = "الرقم القومي لازم يكون أقل من 20 رقم")]
         public string? NationalId { get; set; }
 
+        // PHASE 11 (area 1): optional at create time - new-patient workflow can leave this
+        // blank and assign it later (e.g. once a physical card/wristband number is issued).
+        [StringLength(30, ErrorMessage = "رقم الملف لازم يكون أقل من 30 خانة")]
+        public string? HospitalNumber { get; set; }
+
         [Required(ErrorMessage = "الاسم الأول مطلوب")]
         [StringLength(50)]
         public string FirstName { get; set; } = string.Empty;

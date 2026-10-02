@@ -19,6 +19,9 @@ export interface BedResponse {
 export interface PatientResponse {
   id: string
   nationalId: string | null
+  // PHASE 11 (area 1): the real hospital/medical-record identifier - independent from
+  // NationalId, unique when present, null until an Admin/clinical user assigns one.
+  hospitalNumber: string | null
   firstName: string
   middleName: string
   lastName: string
@@ -167,6 +170,24 @@ export interface UserSummaryResponse {
   createdAt: string
   employeeId: string | null
   profilePhotoUrl: string | null
+  profession: string | null
+  jobTitle: string | null
+  academicDegree: string | null
+  department: string | null
+}
+
+export interface AdmissionSearchResultResponse {
+  admissionId: string
+  patientId: string
+  patientName: string
+  hospitalNumber: string | null
+  nationalIdMasked: string | null
+  status: number
+  isOpen: boolean
+  wardCode: string | null
+  wardName: string | null
+  bedNumber: string | null
+  admissionTime: string
 }
 
 export interface PendingUserResponse {

@@ -12,8 +12,9 @@ import StatusPill from '@/components/StatusPill'
 import { GENDER_OPTIONS, PATIENT_STATUS } from '@/lib/enums'
 import { calculateThrombolyticDose, type ThrombolyticDrug, calculateSeizureDose, type SeizureDrug } from '@/lib/doseCalculator'
 import { recordThrombolysis } from '@/lib/admissionThrombolysisApi'
-import { isDoctorRole } from '@/lib/roles'
+import { isDoctorRole, isClinicalRole } from '@/lib/roles'
 import { isOpenAdmission } from '@/lib/admissions'
+import { maskNationalId } from '@/lib/patients'
 import { describeApiError } from '@/lib/apiError'
 
 const patientsApi = entityApi<PatientResponse>('Patient')
@@ -35,16 +36,9 @@ function statusTone(label: string): 'success' | 'warning' | 'critical' | 'info' 
   return 'warning'
 }
 
-// List-view presentation only — the stored value and the API response are untouched.
-// Keeps only the last 4 characters visible; everything before that becomes asterisks.
-function maskNationalId(value: string) {
-  const trimmed = value.trim()
-  if (trimmed.length <= 4) return '*'.repeat(trimmed.length)
-  return '*'.repeat(trimmed.length - 4) + trimmed.slice(-4)
-}
-
 const emptyForm = {
   nationalId: '',
+  hospitalNumber: '',
   firstName: '',
   middleName: '',
   lastName: '',
@@ -70,6 +64,69 @@ export default function Patients() {
   const [recordBusy, setRecordBusy] = useState(false)
   const [recordMessage, setRecordMessage] = useState<string | null>(null)
   const [recordConfirmed, setRecordConfirmed] = useState(false)
+
+  // PHASE 11 (area 7/8): a real "Edit patient" action, kept entirely separate from the
+  // Admission/Stroke Code/assessment actions above and below — this only ever calls
+  // PUT /api/patient, never touches an Admission, DoorTiming, or assessment record. Gated on
+  // isClinicalRole to match the backend's new [Authorize(Roles = Roles.AnyClinical)] on
+  // PatientController.Update — the button simply isn't rendered for a role that would get a
+  // 403 from the API anyway, but the backend attribute remains the real boundary.
+  const [editTarget, setEditTarget] = useState<PatientResponse | null>(null)
+  const [editForm, setEditForm] = useState(emptyForm)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  function openEdit(p: PatientResponse) {
+    setEditForm({
+      nationalId: p.nationalId ?? '',
+      hospitalNumber: p.hospitalNumber ?? '',
+      firstName: p.firstName,
+      middleName: p.middleName,
+      lastName: p.lastName,
+      dateOfBirth: p.dateOfBirth.slice(0, 10),
+      gender: p.gender,
+      weightKg: String(p.weightKg),
+      chiefComplaint: p.chiefComplaint,
+    })
+    setEditError(null)
+    setEditTarget(p)
+  }
+
+  async function handleEditSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!editTarget || !user?.userId) return
+    setEditSubmitting(true)
+    setEditError(null)
+    try {
+      await patientsApi.update(
+        {
+          id: editTarget.id,
+          nationalId: editForm.nationalId || null,
+          hospitalNumber: editForm.hospitalNumber || null,
+          firstName: editForm.firstName,
+          middleName: editForm.middleName,
+          lastName: editForm.lastName,
+          dateOfBirth: editForm.dateOfBirth,
+          gender: editForm.gender,
+          weightKg: Number(editForm.weightKg),
+          chiefComplaint: editForm.chiefComplaint,
+        },
+        user.userId,
+      )
+      setEditTarget(null)
+      reload()
+    } catch (err) {
+      setEditError(
+        describeApiError(err, {
+          400: 'Could not save these changes — check the fields and try again.',
+          403: 'Your role cannot edit patient demographics.',
+          409: 'Could not save — this hospital number is already assigned to another patient.',
+        }),
+      )
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
 
   function activeAdmissionFor(patientId: string) {
     return admissions.data
@@ -122,6 +179,7 @@ export default function Patients() {
       await patientsApi.create(
         {
           nationalId: form.nationalId || null,
+          hospitalNumber: form.hospitalNumber || null,
           firstName: form.firstName,
           middleName: form.middleName,
           lastName: form.lastName,
@@ -139,7 +197,7 @@ export default function Patients() {
       setFormError(
         describeApiError(err, {
           400: 'Could not create the patient — check the fields and try again.',
-          409: 'Could not create the patient — a patient with this national ID may already be on record.',
+          409: 'Could not create the patient — this hospital number is already assigned to another patient.',
         }),
       )
     } finally {
@@ -154,6 +212,11 @@ export default function Patients() {
         <div className="flex flex-col gap-0.5">
           <span className="font-semibold text-text">
             {p.firstName} {p.middleName} {p.lastName}
+          </span>
+          {/* HospitalNumber first — it's the preferred operational identifier (area 14) —
+              National ID stays masked in this ordinary list view. */}
+          <span className="text-[11.5px] text-text-muted">
+            {p.hospitalNumber ? `Hospital No. ${p.hospitalNumber}` : 'No hospital number assigned'}
           </span>
           <span className="text-[11.5px] text-text-muted">
             {p.nationalId ? `National ID ${maskNationalId(p.nationalId)}` : 'No national ID on file'}
@@ -191,6 +254,15 @@ export default function Patients() {
       header: 'Actions',
       render: (p) => (
         <div className="flex flex-wrap items-center gap-1.5">
+          {isClinicalRole(user?.role) && (
+            <button
+              type="button"
+              onClick={() => openEdit(p)}
+              className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-text-secondary transition-colors duration-150 hover:bg-border-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              Edit
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -227,12 +299,16 @@ export default function Patients() {
         title="Patients"
         subtitle={`${data.length} patient${data.length === 1 ? '' : 's'} on record`}
         action={
-          <PrimaryButton
-            onClick={() => setModalOpen(true)}
-            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
-          >
-            + New patient
-          </PrimaryButton>
+          // PHASE 11 (area 7): previously shown to every logged-in user regardless of role —
+          // the backend had no [Authorize] at all on Patient Create. Now matches it.
+          isClinicalRole(user?.role) ? (
+            <PrimaryButton
+              onClick={() => setModalOpen(true)}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
+            >
+              + New patient
+            </PrimaryButton>
+          ) : undefined
         }
       />
 
@@ -324,6 +400,15 @@ export default function Patients() {
               />
             </Field>
           </div>
+          {/* PHASE 11 (area 1): optional at creation — new-patient workflow can leave this
+              blank and an Admin/clinical user can assign it later from the Edit action below. */}
+          <Field label="Hospital number (optional)">
+            <TextInput
+              placeholder="e.g. a physical card/wristband number, once issued"
+              value={form.hospitalNumber}
+              onChange={(e) => setForm({ ...form, hospitalNumber: e.target.value })}
+            />
+          </Field>
           <Field label="Chief complaint">
             <TextArea
               required
@@ -338,6 +423,98 @@ export default function Patients() {
 
           <PrimaryButton type="submit" disabled={submitting} className="mt-1">
             {submitting ? 'Saving…' : 'Save patient'}
+          </PrimaryButton>
+        </form>
+      </Modal>
+
+      {/* PHASE 11 (area 7/8): a separate modal, deliberately not sharing state with the
+          "New patient" modal above or any Admission/Stroke Code/assessment modal below. */}
+      <Modal
+        open={editTarget !== null}
+        title={`Edit patient${editTarget ? ` — ${editTarget.firstName} ${editTarget.lastName}` : ''}`}
+        onClose={() => setEditTarget(null)}
+      >
+        <form onSubmit={handleEditSubmit} className="flex flex-col gap-3.5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="First name">
+              <TextInput
+                required
+                value={editForm.firstName}
+                onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })}
+              />
+            </Field>
+            <Field label="Middle name">
+              <TextInput
+                required
+                value={editForm.middleName}
+                onChange={(e) => setEditForm({ ...editForm, middleName: e.target.value })}
+              />
+            </Field>
+          </div>
+          <Field label="Last name">
+            <TextInput
+              required
+              value={editForm.lastName}
+              onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })}
+            />
+          </Field>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Date of birth">
+              <TextInput
+                type="date"
+                required
+                value={editForm.dateOfBirth}
+                onChange={(e) => setEditForm({ ...editForm, dateOfBirth: e.target.value })}
+              />
+            </Field>
+            <Field label="Gender">
+              <Select value={editForm.gender} onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}>
+                {GENDER_OPTIONS.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Weight (kg)">
+              <TextInput
+                type="number"
+                step="0.1"
+                min="0.5"
+                required
+                value={editForm.weightKg}
+                onChange={(e) => setEditForm({ ...editForm, weightKg: e.target.value })}
+              />
+            </Field>
+            <Field label="National ID (optional)">
+              <TextInput
+                value={editForm.nationalId}
+                onChange={(e) => setEditForm({ ...editForm, nationalId: e.target.value })}
+              />
+            </Field>
+          </div>
+          <Field label="Hospital number (optional)">
+            <TextInput
+              value={editForm.hospitalNumber}
+              onChange={(e) => setEditForm({ ...editForm, hospitalNumber: e.target.value })}
+            />
+          </Field>
+          <Field label="Chief complaint">
+            <TextArea
+              required
+              value={editForm.chiefComplaint}
+              onChange={(e) => setEditForm({ ...editForm, chiefComplaint: e.target.value })}
+            />
+          </Field>
+
+          {editError && (
+            <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{editError}</p>
+          )}
+
+          <PrimaryButton type="submit" disabled={editSubmitting} className="mt-1">
+            {editSubmitting ? 'Saving…' : 'Save changes'}
           </PrimaryButton>
         </form>
       </Modal>
@@ -418,8 +595,10 @@ export default function Patients() {
                     onChange={(e) => setRecordConfirmed(e.target.checked)}
                     className="mt-0.5"
                   />
-                  I confirm {doseTarget.firstName} {doseTarget.lastName} has been given this dose now — this will
-                  start the 24h antithrombotic lockout on their admission and cannot be undone from here.
+                  I confirm {doseTarget.firstName} {doseTarget.lastName}
+                  {doseTarget.hospitalNumber ? ` (Hospital No. ${doseTarget.hospitalNumber})` : ''} has been given
+                  this dose now — this will start the 24h antithrombotic lockout on their admission and cannot be
+                  undone from here.
                 </label>
                 <button
                   type="button"

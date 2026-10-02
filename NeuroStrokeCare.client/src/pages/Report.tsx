@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { loadAdmissionReport, type AdmissionReport } from '@/lib/reportApi'
 import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
+import AdmissionPicker from '@/components/AdmissionPicker'
+import { usePatientSelection } from '@/context/PatientSelectionContext'
 import { describeApiError } from '@/lib/apiError'
+import { maskNationalId } from '@/lib/patients'
 import {
   PATIENT_STATUS,
   STROKE_TYPE,
@@ -70,7 +73,15 @@ function assessmentRows(report: AdmissionReport) {
 }
 
 export default function Report() {
-  const { admissionId } = useParams<{ admissionId: string }>()
+  // PHASE 11 (area 5, 12): "Report" is also what the spec calls "Timeline" - this page already
+  // renders the timeline (see getTimeline() in reportApi.ts) rather than that being a separate
+  // route (confirmed by grep - there is no standalone Timeline page in this codebase). Falls
+  // back to the shared Patient Selection Context when the route didn't name an admission, and
+  // to a plain AdmissionPicker when neither is available - same pattern as PatientSummary.tsx.
+  const { admissionId: routeAdmissionId } = useParams<{ admissionId?: string }>()
+  const navigate = useNavigate()
+  const { admissionId: contextAdmissionId, select } = usePatientSelection()
+  const admissionId = routeAdmissionId ?? contextAdmissionId ?? undefined
   const [report, setReport] = useState<AdmissionReport | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -89,6 +100,53 @@ export default function Report() {
         ),
       )
   }, [admissionId])
+
+  // Reached directly via /report/:admissionId (e.g. from Admissions.tsx) rather than through
+  // the Patient Selection Context - establish it as the shared context too, same reasoning as
+  // PatientSummary.tsx, so Assessments/Lab Results/Door Timing/Follow-up pick it up from here.
+  useEffect(() => {
+    if (!routeAdmissionId || !report) return
+    select({
+      admissionId: report.admission.id,
+      patientId: report.patient.id,
+      patientName: `${report.patient.firstName} ${report.patient.lastName}`,
+      hospitalNumber: report.patient.hospitalNumber,
+      nationalIdMasked: report.patient.nationalId ? maskNationalId(report.patient.nationalId) : null,
+      status: report.admission.status,
+      isOpen: report.admission.dischargeTime == null,
+      wardCode: report.ward?.code ?? null,
+      wardName: report.ward?.name ?? null,
+      bedNumber: report.bed?.bedNumber ?? null,
+      admissionTime: report.admission.admissionTime,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeAdmissionId, report])
+
+  if (!admissionId) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageHeader title="Patient report" subtitle="Search for a patient or admission to view their report." />
+        <Card>
+          {/* FINAL RELEASE-CANDIDATE PASS (section 11, "Search review"): CONFIRMED BUG, FIXED.
+              AdmissionController.Search's own comment claims "Historical/read-only callers
+              (e.g. Report, Timeline) pass openOnly=false to also reach discharged admissions" -
+              but this call was relying on AdmissionPicker's default (openOnly=true), so a
+              report for an already-discharged admission could never be found through this
+              picker at all, contradicting that documented intent. Explicit openOnly={false}
+              closes the gap; write-workflow pickers elsewhere (Assessments/LabResults/
+              DoorTiming/FollowUp) are intentionally left on the default (true). */}
+          <AdmissionPicker
+            value=""
+            openOnly={false}
+            onSelect={(id, result) => {
+              if (result) select(result)
+              if (id) navigate(`/report/${id}`)
+            }}
+          />
+        </Card>
+      </div>
+    )
+  }
 
   if (error) {
     return (
@@ -133,6 +191,9 @@ export default function Report() {
 
         <Section title="Patient">
           <Row label="Name" value={`${patient.firstName} ${patient.middleName} ${patient.lastName}`} />
+          <Row label="Hospital number" value={patient.hospitalNumber ?? 'Not assigned'} />
+          {/* PHASE 11 (area 14): a formal clinical report is explicitly allowed to show the
+              unmasked National ID - preserved as-is, do not mask this one. */}
           <Row label="National ID" value={patient.nationalId ?? '—'} />
           <Row label="Age / Gender" value={`${age(patient.dateOfBirth)} / ${patient.gender}`} />
           <Row label="Weight" value={`${patient.weightKg} kg`} />

@@ -35,6 +35,15 @@ namespace NeuroStrokeCare.Data.Entities
         public decimal? ThrombolysisDoseMg { get; set; }
         public Guid? ThrombolysisRecordedById { get; set; }
 
+        // FINAL RELEASE-CANDIDATE PASS (section 4): optimistic concurrency token. Not a SQL
+        // Server-native computed `rowversion` column on purpose - NeuroFlowDbContext stamps a
+        // fresh value itself in SaveChanges/SaveChangesAsync for every Added/Modified Admission,
+        // so the exact same behavior works whether the real provider is SQL Server (production)
+        // or SQLite (this test suite's CustomWebApplicationFactory) - see the DbContext comment
+        // next to IsConcurrencyToken() for the full reasoning. Never set this by hand outside
+        // that one place.
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
         // Navigation
         public Patient Patient { get; set; }
         public ApplicationUser AdmittedBy { get; set; }

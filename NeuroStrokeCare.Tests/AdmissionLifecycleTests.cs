@@ -216,17 +216,15 @@ namespace NeuroStrokeCare.Tests
         }
 
         [Fact]
-        public async Task GetById_AfterSoftDelete_StillReturnsTheRecord()
+        public async Task GetById_AfterSoftDelete_ReturnsNotFound()
         {
-            // GAP (Phase 9 spec area 7, "Soft delete"): AdmissionController.GetById builds its
-            // query as `filter: a => a.Id == id` with NO CurrentState check, and
-            // GetByIdWithFiltersQueryHandler/TableRepository.GetByIdAsync<T> apply exactly that
-            // filter with nothing added - there is no global EF query filter on CurrentState
-            // anywhere in NeuroFlowDbContext.OnModelCreating either. So a soft-deleted
-            // (ChangeStatus'd away from Active) admission is still returned by GetById with 200,
-            // not 404. GetAll/GetPaged DO filter correctly (they add CurrentState==Active
-            // themselves) - only the single-record GetById path has this gap.
-            var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(GetById_AfterSoftDelete_StillReturnsTheRecord));
+            // FINAL RELEASE-CANDIDATE PASS (section 6, "Soft delete integrity"): CONFIRMED AND
+            // FIXED. AdmissionController.GetById's query now filters on
+            // `a.Id == id && a.CurrentState == (int)CurrentStatusType.Active`, matching what
+            // GetAll/GetPaged already did. A soft-deleted (ChangeStatus'd away from Active)
+            // admission is now a clean 404 here too - this test used to document the opposite
+            // (gap) behavior, 200.
+            var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(GetById_AfterSoftDelete_ReturnsNotFound));
             var (patientId, _) = await SeedPatientAndBedAsync(userId);
 
             var create = await client.PostAsJsonAsync($"/api/Admission?actingUserId={userId}", new CreateAdmissionRequest
@@ -242,8 +240,7 @@ namespace NeuroStrokeCare.Tests
 
             var getAfterDelete = await client.GetAsync($"/api/Admission/{admissionId}");
 
-            // Documents the gap: expected 404 per the spec, actual is 200.
-            Assert.Equal(HttpStatusCode.OK, getAfterDelete.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, getAfterDelete.StatusCode);
         }
     }
 }

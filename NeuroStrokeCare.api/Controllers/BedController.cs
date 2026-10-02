@@ -2,6 +2,7 @@ using AutoMapper;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using NeuroStrokeCare.Data.Constants;
 using NeuroStrokeCare.Core.Features.BaseService.Commands.Models;
 using NeuroStrokeCare.Core.Features.BaseService.Queries.Models;
@@ -9,6 +10,7 @@ using NeuroStrokeCare.Core.Features.Bed.Dtos;
 using NeuroStrokeCare.Data.Entities;
 using NeuroStrokeCare.Data.Enums;
 using NeuroStrokeCare.Data.PageModel;
+using NeuroStrokeCare.infrastructure.Context;
 
 namespace NeuroStrokeCare.api.Controllers
 {
@@ -19,15 +21,33 @@ namespace NeuroStrokeCare.api.Controllers
         #region Fields
         private readonly IMediator _mediator;
         private readonly IMapper _mapper;
+        private readonly NeuroFlowDbContext _context;
         #endregion
 
         #region Constructor
-        public BedController(IMediator mediator, IMapper mapper)
+        public BedController(IMediator mediator, IMapper mapper, NeuroFlowDbContext context)
         {
             _mediator = mediator;
             _mapper = mapper;
+            _context = context;
         }
         #endregion
+
+        // FINAL RELEASE-CANDIDATE PASS (section 5): "occupied" here means an ACTIVE, still-open
+        // Admission actually points at this bed (BedId == bed.Id, CurrentState == Active,
+        // DischargeTime == null) - not just Bed.Status == Occupied. The FK is the real source of
+        // truth; Bed.Status is a cached label that AdmissionController.Create/Transfer keep in
+        // sync when THEY move patients, but trusting Status alone here would mean a bed whose
+        // Status was ever left stale (or set directly through this very controller, which is
+        // exactly the gap being closed) could still be freed/deleted/reassigned out from under a
+        // real patient. BedIntegrityTests documented this gap directly (Update_OnOccupiedBed_IsNotBlocked,
+        // ChangeStatus_OnOccupiedBed_IsNotBlocked) before this fix.
+        private async Task<bool> IsHeldByActiveAdmissionAsync(Guid bedId, CancellationToken cancellationToken) =>
+            await _context.Set<Admission>().AnyAsync(
+                a => a.BedId == bedId &&
+                     a.CurrentState == (int)CurrentStatusType.Active &&
+                     a.DischargeTime == null,
+                cancellationToken);
 
         #region Selectors
         private static readonly System.Linq.Expressions.Expression<Func<Bed, BedResponse>> ToResponse =
@@ -115,6 +135,15 @@ namespace NeuroStrokeCare.api.Controllers
             [FromQuery] Guid actingUserId,
             CancellationToken cancellationToken)
         {
+            // A bed actually held by an active admission may only ever report Status ==
+            // Occupied through this endpoint - any other requested status (Vacant, Cleaning,
+            // OutOfService, ...) would free a bed a real patient is still in.
+            if (request.Status != BedStatus.Occupied &&
+                await IsHeldByActiveAdmissionAsync(request.Id, cancellationToken))
+            {
+                return Conflict(new { message = "This bed is currently occupied by an active admission — discharge or transfer that admission (PATCH /admission/{id}/transfer) before changing this bed's status." });
+            }
+
             var bed = _mapper.Map<Bed>(request);
 
             var command = new UpdateCommand<Bed>(bed, actingUserId);
@@ -135,6 +164,16 @@ namespace NeuroStrokeCare.api.Controllers
             [FromQuery] int status,
             CancellationToken cancellationToken)
         {
+            // CurrentState here is the generic soft-delete/reactivate flag (BaseEntity), separate
+            // from Bed.Status above - soft-deleting (Inactive) a bed a real patient is still in
+            // would hide it from every "active beds" listing while the admission still points at
+            // it. Reactivating (Active) is always safe, so only block the Inactive direction.
+            if (status != (int)CurrentStatusType.Active &&
+                await IsHeldByActiveAdmissionAsync(id, cancellationToken))
+            {
+                return Conflict(new { message = "This bed is currently occupied by an active admission — discharge or transfer that admission before deactivating this bed." });
+            }
+
             var command = new ChangeStatusCommand<Bed>(id, actingUserId, status);
             await _mediator.Send(command, cancellationToken);
             return NoContent();
@@ -146,6 +185,11 @@ namespace NeuroStrokeCare.api.Controllers
         [HttpDelete("{id:guid}")]
         public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
         {
+            if (await IsHeldByActiveAdmissionAsync(id, cancellationToken))
+            {
+                return Conflict(new { message = "This bed is currently occupied by an active admission — discharge or transfer that admission before deleting this bed." });
+            }
+
             var command = new DeleteCommand<Bed>(id);
             var success = await _mediator.Send(command, cancellationToken);
 

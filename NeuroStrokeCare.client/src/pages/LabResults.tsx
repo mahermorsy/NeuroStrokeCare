@@ -8,6 +8,8 @@ import type { LabResultsResponse, AdmissionResponse } from '@/types/entities'
 import DataTable, { type Column } from '@/components/DataTable'
 import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
 import Modal from '@/components/Modal'
+import ContextAwareAdmissionField from '@/components/ContextAwareAdmissionField'
+import { usePatientSelection } from '@/context/PatientSelectionContext'
 import { Field, TextInput, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
 import { isDoctorRole, isNurseRole } from '@/lib/roles'
@@ -62,8 +64,15 @@ const emptyForm = {
 
 export default function LabResults() {
   const { user } = useAuth()
+  const { admissionId: contextAdmissionId } = usePatientSelection()
   const { data, loading, error, reload } = useEntityList(() => labResultsApi.list())
-  const { patientNameByAdmissionId, loading: contextLoading, error: contextError, reload: reloadContext } = useAdmissionContext()
+  const {
+    patientNameByAdmissionId,
+    hospitalNumberByAdmissionId,
+    loading: contextLoading,
+    error: contextError,
+    reload: reloadContext,
+  } = useAdmissionContext()
   const admissions = useEntityList(() => admissionsApi.list())
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -74,7 +83,9 @@ export default function LabResults() {
   const canWrite = isDoctorRole(user?.role) || isNurseRole(user?.role)
 
   function openNew() {
-    setForm(emptyForm)
+    // PHASE 11 (area 5): auto-use the shared Patient Selection Context's admission when one is
+    // set, instead of always starting from an empty picker.
+    setForm({ ...emptyForm, admissionId: contextAdmissionId ?? '' })
     setFormError(null)
     setModalOpen(true)
   }
@@ -126,7 +137,19 @@ export default function LabResults() {
   }
 
   const columns: Column<LabResultsResponse>[] = [
-    { header: 'Patient', render: (r) => patientNameByAdmissionId.get(r.admissionId) ?? '—' },
+    {
+      header: 'Patient',
+      render: (r) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-text">{patientNameByAdmissionId.get(r.admissionId) ?? '—'}</span>
+          <span className="text-[11.5px] text-text-muted">
+            {hospitalNumberByAdmissionId.get(r.admissionId)
+              ? `Hospital No. ${hospitalNumberByAdmissionId.get(r.admissionId)}`
+              : 'No hospital number assigned'}
+          </span>
+        </div>
+      ),
+    },
     { header: 'Recorded at', render: (r) => new Date(r.recordedAt).toLocaleString() },
     { header: 'Glucose', render: (r) => value(r.glucoseMmol, ' mmol/L') },
     { header: 'INR', render: (r) => value(r.inr) },
@@ -205,21 +228,10 @@ export default function LabResults() {
       <Modal open={modalOpen} title="New lab result" onClose={() => setModalOpen(false)}>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
           <Field label="Patient / admission">
-            <Select
-              required
+            <ContextAwareAdmissionField
               value={form.admissionId}
-              onChange={(e) => setForm({ ...form, admissionId: e.target.value })}
-            >
-              <option value="" disabled>
-                Select an admission…
-              </option>
-              {admissions.data.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {patientNameByAdmissionId.get(a.id) ?? a.id.slice(0, 8)} —{' '}
-                  {new Date(a.admissionTime).toLocaleDateString()}
-                </option>
-              ))}
-            </Select>
+              onSelect={(id) => setForm({ ...form, admissionId: id })}
+            />
           </Field>
 
           <Field label="Recorded at">

@@ -231,7 +231,11 @@ namespace NeuroStrokeCare.Service.Auth
                     IsRootSuperAdmin = user.IsRootSuperAdmin,
                     CreatedAt = user.CreatedAt,
                     EmployeeId = user.EmployeeId,
-                    ProfilePhotoUrl = user.ProfilePhotoUrl
+                    ProfilePhotoUrl = user.ProfilePhotoUrl,
+                    Profession = user.Profession,
+                    JobTitle = user.JobTitle,
+                    AcademicDegree = user.AcademicDegree,
+                    Department = user.Department
                 });
             }
 
@@ -357,11 +361,22 @@ namespace NeuroStrokeCare.Service.Auth
                 IsRootSuperAdmin = user.IsRootSuperAdmin,
                 CreatedAt = user.CreatedAt,
                 EmployeeId = user.EmployeeId,
-                ProfilePhotoUrl = user.ProfilePhotoUrl
+                ProfilePhotoUrl = user.ProfilePhotoUrl,
+                Profession = user.Profession,
+                JobTitle = user.JobTitle,
+                AcademicDegree = user.AcademicDegree,
+                Department = user.Department
             };
         }
 
-        public async Task<AuthResponse> UpdateUserAdminAsync(Guid userId, string? role, string? employeeId)
+        public async Task<AuthResponse> UpdateUserAdminAsync(
+            Guid userId,
+            string? role,
+            string? employeeId,
+            string? profession = null,
+            string? jobTitle = null,
+            string? academicDegree = null,
+            string? department = null)
         {
             var user = await _userManager.FindByIdAsync(userId.ToString());
             if (user == null || user.IsDeleted)
@@ -383,6 +398,17 @@ namespace NeuroStrokeCare.Service.Auth
             // employeeId ماينفعش يتفضى بعد ما يتحدد - بس ممكن يتغير أو يتحدد لأول مرة
             if (employeeId != null)
                 user.EmployeeId = string.IsNullOrWhiteSpace(employeeId) ? null : employeeId.Trim();
+
+            // Same null-leaves-alone / empty-string-clears convention for the new optional
+            // staff-profile fields (ADDITIONAL CLINICAL UX & STAFF PROFILE TASKS, area 2).
+            if (profession != null)
+                user.Profession = string.IsNullOrWhiteSpace(profession) ? null : profession.Trim();
+            if (jobTitle != null)
+                user.JobTitle = string.IsNullOrWhiteSpace(jobTitle) ? null : jobTitle.Trim();
+            if (academicDegree != null)
+                user.AcademicDegree = string.IsNullOrWhiteSpace(academicDegree) ? null : academicDegree.Trim();
+            if (department != null)
+                user.Department = string.IsNullOrWhiteSpace(department) ? null : department.Trim();
 
             await _userManager.UpdateAsync(user);
 

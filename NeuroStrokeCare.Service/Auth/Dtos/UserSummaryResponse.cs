@@ -13,5 +13,9 @@ namespace NeuroStrokeCare.Service.Auth.Dtos
         public DateTime CreatedAt { get; set; }
         public string? EmployeeId { get; set; }
         public string? ProfilePhotoUrl { get; set; }
+        public string? Profession { get; set; }
+        public string? JobTitle { get; set; }
+        public string? AcademicDegree { get; set; }
+        public string? Department { get; set; }
     }
 }

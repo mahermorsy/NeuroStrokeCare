@@ -21,7 +21,17 @@ export default function Alerts() {
       render: (a) => <StatusPill label={a.severity === 'critical' ? 'Critical' : 'Warning'} tone={a.severity} />,
     },
     { header: 'Category', render: (a) => a.category },
-    { header: 'Patient', render: (a) => a.patientName },
+    {
+      header: 'Patient',
+      render: (a) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-text">{a.patientName}</span>
+          <span className="text-[11.5px] text-text-muted">
+            {a.hospitalNumber ? `Hospital No. ${a.hospitalNumber}` : 'No hospital number assigned'}
+          </span>
+        </div>
+      ),
+    },
     { header: 'Alert', render: (a) => <span className="text-text-secondary">{a.message}</span> },
     { header: 'When', render: (a) => new Date(a.when).toLocaleString() },
     {

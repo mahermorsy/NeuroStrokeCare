@@ -49,6 +49,46 @@ namespace NeuroStrokeCare.Tests
             Assert.NotNull(auditEntry);
         }
 
+        // FINAL RELEASE-CANDIDATE PASS: same bug class as the Thrombolysis one the spec called
+        // out explicitly (see ThrombolysisRegressionTests.NormalAdmissionPut_DoesNotEraseThrombolysisFields)
+        // - found while fixing that one and closed the same way. StrokeType/StrokeTypeSetAt/
+        // StrokeTypeSetById are still fields on UpdateAdmissionRequest (kept there per that
+        // DTO's own comment, "until migrated to a dedicated command"), but nothing forced an
+        // ordinary PUT's caller to actually echo the current values back - so a PUT that
+        // merely corrected, say, CT findings could silently revert a previously-set stroke
+        // type to null. AdmissionController.Update now restores all three from the pre-update
+        // row unconditionally, the same way it already did for AdmittedById/Thrombolysis*.
+        [Fact]
+        public async Task NormalAdmissionPut_DoesNotEraseStrokeType()
+        {
+            var (client, userId, admissionId) = await CreateOpenAdmissionAsync(nameof(NormalAdmissionPut_DoesNotEraseStrokeType));
+
+            var setStrokeType = await client.PatchAsync(
+                $"/api/Admission/{admissionId}/stroke-type?actingUserId={userId}&strokeType={(int)StrokeType.Ischemic}",
+                content: null);
+            Assert.Equal(HttpStatusCode.NoContent, setStrokeType.StatusCode);
+
+            var beforePut = await (await client.GetAsync($"/api/Admission/{admissionId}")).Content.ReadFromJsonAsync<AdmissionResponse>();
+            Assert.Equal(StrokeType.Ischemic, beforePut!.StrokeType); // sanity check it's really there
+
+            // An unrelated, routine PUT that never mentions stroke type at all.
+            var putResponse = await client.PutAsJsonAsync($"/api/Admission?actingUserId={userId}", new UpdateAdmissionRequest
+            {
+                Id = admissionId,
+                PatientId = beforePut.PatientId,
+                AdmissionTime = beforePut.AdmissionTime,
+                Status = beforePut.Status,
+                BedId = beforePut.BedId,
+                CTFindings = "Updated CT findings - no new infarct",
+            });
+            Assert.Equal(HttpStatusCode.NoContent, putResponse.StatusCode);
+
+            var afterPut = await (await client.GetAsync($"/api/Admission/{admissionId}")).Content.ReadFromJsonAsync<AdmissionResponse>();
+            Assert.Equal(StrokeType.Ischemic, afterPut!.StrokeType);
+            Assert.Equal(userId, afterPut.StrokeTypeSetById);
+            Assert.NotNull(afterPut.StrokeTypeSetAt);
+        }
+
         [Fact]
         public async Task SetStrokeType_OnClosedAdmission_IsNotRejected()
         {

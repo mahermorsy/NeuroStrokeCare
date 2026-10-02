@@ -52,6 +52,14 @@ export default function Users() {
   const [editTarget, setEditTarget] = useState<UserSummaryResponse | null>(null)
   const [editRole, setEditRole] = useState('Resident')
   const [editEmployeeId, setEditEmployeeId] = useState('')
+  // ADDITIONAL CLINICAL UX & STAFF PROFILE TASKS (area 2/4): Profession/JobTitle/
+  // AcademicDegree/Department are privileged employment fields - like EmployeeId and Role
+  // above, they are only editable here (Admin-only page, see the role check below), never
+  // through the self-service "My Profile" editor.
+  const [editProfession, setEditProfession] = useState('')
+  const [editJobTitle, setEditJobTitle] = useState('')
+  const [editAcademicDegree, setEditAcademicDegree] = useState('')
+  const [editDepartment, setEditDepartment] = useState('')
   const [editBusy, setEditBusy] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
 
@@ -101,7 +109,14 @@ export default function Users() {
     setEditBusy(true)
     setEditError(null)
     try {
-      await usersApi.updateAdmin(editTarget.id, { role: editRole, employeeId: editEmployeeId })
+      await usersApi.updateAdmin(editTarget.id, {
+        role: editRole,
+        employeeId: editEmployeeId,
+        profession: editProfession,
+        jobTitle: editJobTitle,
+        academicDegree: editAcademicDegree,
+        department: editDepartment,
+      })
       setEditTarget(null)
       reload()
     } catch (err) {
@@ -173,6 +188,10 @@ export default function Users() {
           onClick={() => {
             setEditRole(u.role)
             setEditEmployeeId(u.employeeId ?? '')
+            setEditProfession(u.profession ?? '')
+            setEditJobTitle(u.jobTitle ?? '')
+            setEditAcademicDegree(u.academicDegree ?? '')
+            setEditDepartment(u.department ?? '')
             setEditError(null)
             setEditTarget(u)
           }}
@@ -364,6 +383,34 @@ export default function Users() {
             <Field label="Employee ID">
               <TextInput value={editEmployeeId} onChange={(e) => setEditEmployeeId(e.target.value)} />
             </Field>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Profession (optional)">
+                <TextInput
+                  placeholder="Doctor, Nurse, Pharmacist…"
+                  value={editProfession}
+                  onChange={(e) => setEditProfession(e.target.value)}
+                />
+              </Field>
+              <Field label="Job title (optional)">
+                <TextInput
+                  placeholder="Resident, Consultant, Head Nurse…"
+                  value={editJobTitle}
+                  onChange={(e) => setEditJobTitle(e.target.value)}
+                />
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Academic degree (optional)">
+                <TextInput
+                  placeholder="MBBS, MSc, MD, PhD…"
+                  value={editAcademicDegree}
+                  onChange={(e) => setEditAcademicDegree(e.target.value)}
+                />
+              </Field>
+              <Field label="Department (optional)">
+                <TextInput value={editDepartment} onChange={(e) => setEditDepartment(e.target.value)} />
+              </Field>
+            </div>
             {editError && (
               <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{editError}</p>
             )}

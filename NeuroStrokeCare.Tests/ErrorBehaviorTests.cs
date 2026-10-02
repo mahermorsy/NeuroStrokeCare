@@ -7,14 +7,13 @@ using Xunit;
 namespace NeuroStrokeCare.Tests
 {
     // Spec area 13: "Expected domain failures should not return avoidable 500 responses."
-    // Reality, traced through Program.cs + TableRepository.cs: there is exactly one exception
-    // handler in the whole pipeline (Program.cs's app.UseExceptionHandler), and it maps every
-    // unhandled exception - including TableRepository's own DataAccessException, which it
-    // deliberately throws for a plain "not found" (ChangeStatus/UpdateAsync's missing-row paths
-    // partially; see below) - to a flat 500. There is no middleware or filter anywhere that
-    // inspects exception type and maps "not found" to 404. These tests document the actual,
-    // current status codes for the domain failures the spec calls out, rather than the ones it
-    // expects.
+    // FINAL RELEASE-CANDIDATE PASS (sections 1(f), 4, 8): CONFIRMED AND FIXED. Program.cs's
+    // single app.UseExceptionHandler now unwraps DataAccessException.InnerException and maps
+    // a few known, safe domain exceptions explicitly: KeyNotFoundException (thrown directly by
+    // GenericRepository.ChangeStatus on a missing id) -> 404, and DbUpdateConcurrencyException
+    // (thrown by SaveChangesAsync when Admission.RowVersion no longer matches - see the new
+    // concurrency token added this phase) -> 409. Anything not on that explicit list still
+    // falls through to the original flat 500, unchanged.
     public class ErrorBehaviorTests : IAsyncLifetime
     {
         private CustomWebApplicationFactory _factory = null!;
@@ -22,15 +21,15 @@ namespace NeuroStrokeCare.Tests
         public Task DisposeAsync() { _factory.Dispose(); return Task.CompletedTask; }
 
         [Fact]
-        public async Task Admission_ChangeStatus_OnNonExistentId_Returns500NotFriendly404()
+        public async Task Admission_ChangeStatus_OnNonExistentId_ReturnsCleanNotFound()
         {
-            var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(Admission_ChangeStatus_OnNonExistentId_Returns500NotFriendly404));
+            var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(Admission_ChangeStatus_OnNonExistentId_ReturnsCleanNotFound));
 
             var response = await client.PatchAsync(
                 $"/api/Admission/{Guid.NewGuid()}/status?actingUserId={userId}&status={(int)CurrentStatusType.Inactive}",
                 content: null);
 
-            Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
         [Fact]

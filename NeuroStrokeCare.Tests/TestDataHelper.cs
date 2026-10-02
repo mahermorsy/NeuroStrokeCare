@@ -112,16 +112,28 @@ namespace NeuroStrokeCare.Tests
             return bed.Id;
         }
 
-        public static async Task<Guid> SeedPatientAsync(IServiceProvider services, Guid createdBy)
+        // PHASE 11: optional trailing parameters (nationalId/hospitalNumber/firstName/lastName)
+        // added so Phase 11 tests can seed exactly the identifiers they need to search/collide
+        // on, without changing any existing call site above (all of which keep using the
+        // original defaults: no National ID/Hospital Number, "Test ... Regression").
+        public static async Task<Guid> SeedPatientAsync(
+            IServiceProvider services,
+            Guid createdBy,
+            string? nationalId = null,
+            string? hospitalNumber = null,
+            string firstName = "Test",
+            string lastName = "Regression")
         {
             using var scope = services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<NeuroFlowDbContext>();
             var patient = new Patient
             {
                 Id = Guid.NewGuid(),
-                FirstName = "Test",
+                NationalId = nationalId,
+                HospitalNumber = hospitalNumber,
+                FirstName = firstName,
                 MiddleName = "Patient",
-                LastName = "Regression",
+                LastName = lastName,
                 DateOfBirth = new DateTime(1980, 1, 1),
                 Gender = "Male",
                 WeightKg = 70,

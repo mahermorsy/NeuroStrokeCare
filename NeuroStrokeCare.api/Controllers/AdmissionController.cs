@@ -56,7 +56,8 @@ namespace NeuroStrokeCare.api.Controllers
                 CTADone = a.CTADone,
                 CTFindings = a.CTFindings,
                 MRIFindings = a.MRIFindings,
-                CTAFindings = a.CTAFindings
+                CTAFindings = a.CTAFindings,
+                RowVersion = a.RowVersion
             };
         #endregion
 
@@ -103,12 +104,125 @@ namespace NeuroStrokeCare.api.Controllers
             return Ok(result);
         }
 
+        // GET: api/admission/search?q=...&openOnly=true&take=20
+        // PHASE 11 (areas 1/2/15/16): minimal read-only typeahead search for the clinical
+        // forms that used to load every active admission into one giant <select>
+        // (Assessments, Lab Results, Door Timing activation, Follow-up Notes).
+        //
+        // Search priority is now HospitalNumber -> NationalId -> name, as this phase asked -
+        // the "no hospital number field exists" discrepancy from the previous phase's report
+        // is resolved: HospitalNumber now exists on Patient (see PatientController/the
+        // migration). Priority is implemented as a match-rank in the ORDER BY (0 = matched on
+        // HospitalNumber, 1 = NationalId, 2 = name/no term), translated to a SQL CASE
+        // expression by EF Core - not a two-pass or client-side sort.
+        //
+        // - [Authorize(Roles = Roles.AnyClinical)] added this phase - every other clinical
+        //   read/write endpoint in the solution already requires at least AnyClinical/
+        //   AnyDoctor/AnyNurse; this one previously relied on nothing but the global
+        //   authenticated-user fallback policy, which is the gap area 16 asked to close.
+        // - Never returns a soft-deleted Patient or Admission (CurrentState filter on both).
+        // - "openOnly" (default true) restricts results to admissions with no DischargeTime,
+        //   matching isOpenAdmission() on the frontend - "only active/open admissions
+        //   selectable for new clinical writes". Historical/read-only callers (e.g. Report,
+        //   Timeline) pass openOnly=false to also reach discharged admissions.
+        // - Only the fields the picker needs are returned (AdmissionSearchResultResponse) -
+        //   never a full Patient/Admission record.
+        // - Database-side filtering throughout (AsNoTracking, no in-memory Where/Contains) -
+        //   capped result count (clamped 1-50), deterministic ordering (match rank, then most
+        //   recent admission first), no pagination. An empty/missing `q` still only returns
+        //   up to `take` rows (most recent open admissions), never the whole table.
+        [Authorize(Roles = Roles.AnyClinical)]
+        [HttpGet("search")]
+        public async Task<ActionResult<List<AdmissionSearchResultResponse>>> Search(
+            [FromQuery] string? q,
+            [FromQuery] bool openOnly = true,
+            [FromQuery] int take = 20,
+            CancellationToken cancellationToken = default)
+        {
+            take = Math.Clamp(take, 1, 50);
+            var term = q?.Trim();
+            var hasTerm = !string.IsNullOrWhiteSpace(term);
+
+            var query = _context.Set<Admission>()
+                .AsNoTracking()
+                .Where(a => a.CurrentState == (int)CurrentStatusType.Active &&
+                            a.Patient.CurrentState == (int)CurrentStatusType.Active);
+
+            if (openOnly)
+                query = query.Where(a => a.DischargeTime == null);
+
+            if (hasTerm)
+            {
+                query = query.Where(a =>
+                    (a.Patient.HospitalNumber != null && a.Patient.HospitalNumber.Contains(term)) ||
+                    (a.Patient.NationalId != null && a.Patient.NationalId.Contains(term)) ||
+                    a.Patient.FirstName.Contains(term) ||
+                    a.Patient.LastName.Contains(term) ||
+                    (a.Patient.FirstName + " " + a.Patient.LastName).Contains(term));
+            }
+
+            var results = await query
+                // Match-rank first (HospitalNumber=0, NationalId=1, name/no-term=2), then most
+                // recent admission first within the same rank.
+                .OrderBy(a => hasTerm && a.Patient.HospitalNumber != null && a.Patient.HospitalNumber.Contains(term)
+                    ? 0
+                    : hasTerm && a.Patient.NationalId != null && a.Patient.NationalId.Contains(term)
+                        ? 1
+                        : 2)
+                .ThenByDescending(a => a.AdmissionTime)
+                .Take(take)
+                .Select(a => new AdmissionSearchResultResponse
+                {
+                    AdmissionId = a.Id,
+                    PatientId = a.PatientId,
+                    PatientName = a.Patient.FirstName + " " + a.Patient.LastName,
+                    HospitalNumber = a.Patient.HospitalNumber,
+                    NationalIdMasked = a.Patient.NationalId,
+                    Status = a.Status,
+                    IsOpen = a.DischargeTime == null,
+                    WardCode = a.Bed != null ? a.Bed.Ward.Code : null,
+                    WardName = a.Bed != null ? a.Bed.Ward.Name : null,
+                    BedNumber = a.Bed != null ? a.Bed.BedNumber : null,
+                    AdmissionTime = a.AdmissionTime
+                })
+                .ToListAsync(cancellationToken);
+
+            // Masking is plain string logic, not translatable to SQL - done after
+            // materializing the (already capped-to-`take`-rows) result set.
+            foreach (var r in results)
+                r.NationalIdMasked = MaskNationalId(r.NationalIdMasked);
+
+            return Ok(results);
+        }
+
+        // بيسيب آخر 4 خانات بس ظاهرة - "•••••••1234" - مستخدمة في نتائج البحث فوق فقط،
+        // الـ Endpoints التانية (GetById بتاع Patient مثلاً) لسه بترجع الرقم القومي كامل
+        // لمن عنده صلاحية يشوف الملف الكامل.
+        private static string? MaskNationalId(string? nationalId)
+        {
+            if (string.IsNullOrEmpty(nationalId))
+                return nationalId;
+
+            if (nationalId.Length <= 4)
+                return new string('•', nationalId.Length);
+
+            return new string('•', nationalId.Length - 4) + nationalId[^4..];
+        }
+
         // GET: api/admission/{id}
         [HttpGet("{id:guid}")]
         public async Task<ActionResult<AdmissionResponse>> GetById(Guid id, CancellationToken cancellationToken)
         {
+            // FINAL RELEASE-CANDIDATE PASS (section 6, "Soft delete integrity"): CONFIRMED BUG,
+            // FIXED HERE. This GetById used to filter on Id alone, so a soft-deleted row
+            // (CurrentState != Active) was still returned as a normal 200 through this exact
+            // same endpoint any ordinary clinical read uses - there was no separate "admin can
+            // still see deleted records" endpoint being bypassed here, this WAS the only read
+            // path, and it did not distinguish. Adding the CurrentState check makes a
+            // soft-deleted record 404 here, consistent with GetAll/paged (which already filter
+            // on CurrentState) and with how every write endpoint already treats "not found".
             var query = new GetByIdWithFiltersQuery<Admission, AdmissionResponse>(
-                filter: a => a.Id == id,
+                filter: a => a.Id == id && a.CurrentState == (int)CurrentStatusType.Active,
                 selector: ToResponse);
 
             var result = await _mediator.Send(query, cancellationToken);
@@ -228,6 +342,44 @@ namespace NeuroStrokeCare.api.Controllers
             // بيانات الإدخال، عشان سجل "مين قبل المريض فعليًا" يفضل صحيح لأي مراجعة/تدقيق
             // لاحقة. اللي بيتغير مع كل تعديل هو UpdatedBy (بيتحط تلقائيًا من UpdateCommand).
             admission.AdmittedById = current.AdmittedById;
+
+            // FINAL RELEASE-CANDIDATE PASS (section 2) - CONFIRMED BUG, FIXED HERE:
+            // ThrombolysisGivenAt/ThrombolysisDrug/ThrombolysisDoseMg/ThrombolysisRecordedById
+            // are NOT fields on UpdateAdmissionRequest, so AutoMapper always left them null/0 on admission
+            // above - and because this PUT replaces the whole row via the generic
+            // UpdateCommand (which only restores CreatedAt/CreatedBy/CurrentState, not these),
+            // every ordinary Update call used to silently WIPE a recorded thrombolysis dose,
+            // 100% of the time, regardless of what the frontend sent. These 4 fields have their
+            // own dedicated, audited command (PATCH /{id}/thrombolysis, RecordThrombolysis below)
+            // exactly like BedId has /transfer above - so this PUT must never be able to touch
+            // them at all, not just "hope the caller echoes the right value back."
+            admission.ThrombolysisGivenAt = current.ThrombolysisGivenAt;
+            admission.ThrombolysisDrug = current.ThrombolysisDrug;
+            admission.ThrombolysisDoseMg = current.ThrombolysisDoseMg;
+            admission.ThrombolysisRecordedById = current.ThrombolysisRecordedById;
+
+            // Same latent risk found on StrokeType/StrokeTypeSetAt/StrokeTypeSetById while fixing
+            // the above: UpdateAdmissionRequest still carries these three (the comment on the DTO
+            // says so explicitly - "until migrated to a dedicated command, kept here so we don't
+            // lose data"), but SetStrokeType below IS already that dedicated command, and nothing
+            // forces this PUT's caller to actually echo the current values back. Closing the same
+            // gap the same way, now that both dedicated commands exist, is strictly safer than
+            // leaving it to caller discipline.
+            admission.StrokeType = current.StrokeType;
+            admission.StrokeTypeSetAt = current.StrokeTypeSetAt;
+            admission.StrokeTypeSetById = current.StrokeTypeSetById;
+
+            // FINAL RELEASE-CANDIDATE PASS (section 4): optimistic concurrency. `admission` here
+            // is a brand-new, never-tracked object (AutoMapper built it from `request` above) -
+            // whatever we set on its RowVersion right before GenericRepository.UpdateAsync calls
+            // _dbSet.Update(admission) becomes EF's "original value" for the concurrency check,
+            // since EF has no earlier snapshot of its own for an entity it has never tracked.
+            // Prefer the caller's own echoed RowVersion (true protection against edits made since
+            // THEIR last read of this admission) and fall back to the value this request itself
+            // just read in `current` above (still protects against a genuinely concurrent write
+            // landing between that read and this save) when the caller didn't send one - see the
+            // comment on UpdateAdmissionRequest.RowVersion for why this stays optional.
+            admission.RowVersion = request.RowVersion ?? current.RowVersion;
 
             var command = new UpdateCommand<Admission>(admission, actingUserId);
             var affectedRows = await _mediator.Send(command, cancellationToken);

@@ -26,5 +26,11 @@ namespace NeuroStrokeCare.Core.Features.Admission.Dtos
         public string? ThrombolysisDrug { get; set; }
         public decimal? ThrombolysisDoseMg { get; set; }
         public Guid? ThrombolysisRecordedById { get; set; }
+
+        // FINAL RELEASE-CANDIDATE PASS (section 4): callers that want real end-to-end
+        // optimistic-concurrency protection (not just the narrower same-request race window the
+        // backend already protects on its own) should echo this value back on their next
+        // PUT/PATCH for this admission - see UpdateAdmissionRequest.RowVersion.
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
     }
 }

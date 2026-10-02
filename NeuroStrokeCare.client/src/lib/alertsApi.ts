@@ -35,6 +35,10 @@ export interface AlertItem {
   severity: 'critical' | 'warning'
   category: string
   patientName: string
+  // PHASE 11 (area 10): "include HospitalNumber when useful" - attached to every alert
+  // uniformly (see the single pass at the end of loadAlerts below) so every category gets it
+  // without touching each of this file's ~20 individual alert-building call sites.
+  hospitalNumber: string | null
   admissionId: string
   message: string
   when: string
@@ -77,13 +81,18 @@ export async function loadAlerts(): Promise<AlertItem[]> {
   ])
 
   const patientNameById = new Map(patients.map((p) => [p.id, `${p.firstName} ${p.lastName}`]))
+  const hospitalNumberById = new Map(patients.map((p) => [p.id, p.hospitalNumber]))
   const admissionById = new Map(admissions.map((a) => [a.id, a]))
   const nameFor = (admissionId: string) => {
     const a = admissionById.get(admissionId)
     return a ? (patientNameById.get(a.patientId) ?? 'Unknown patient') : 'Unknown patient'
   }
+  const hospitalNumberFor = (admissionId: string): string | null => {
+    const a = admissionById.get(admissionId)
+    return a ? (hospitalNumberById.get(a.patientId) ?? null) : null
+  }
 
-  const alerts: AlertItem[] = []
+  const alerts: Omit<AlertItem, 'hospitalNumber'>[] = []
 
   labResults.forEach((l) => {
     const flags = [l.inrAlert && 'INR', l.glucoseAlert && 'Glucose', l.plateletsAlert && 'Platelets'].filter(
@@ -378,5 +387,9 @@ export async function loadAlerts(): Promise<AlertItem[]> {
       }
     })
 
-  return alerts.sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime())
+  // Single pass to attach HospitalNumber (area 10) rather than threading it through every
+  // alerts.push({...}) call site above.
+  return alerts
+    .map((a) => ({ ...a, hospitalNumber: hospitalNumberFor(a.admissionId) }))
+    .sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime())
 }

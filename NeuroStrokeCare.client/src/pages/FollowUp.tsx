@@ -8,6 +8,8 @@ import type { AdmissionResponse, PatientResponse, FollowUpNoteResponse } from '@
 import DataTable, { type Column } from '@/components/DataTable'
 import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
 import Modal from '@/components/Modal'
+import ContextAwareAdmissionField from '@/components/ContextAwareAdmissionField'
+import { usePatientSelection } from '@/context/PatientSelectionContext'
 import { Field, TextArea, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
 import { isDoctorRole, isNurseRole, roleLabel } from '@/lib/roles'
@@ -24,6 +26,7 @@ const NOTE_TYPE_OPTIONS = [
 const emptyForm = { admissionId: '', content: '', noteType: 1 }
 
 export default function FollowUp() {
+  const { admissionId: contextAdmissionId } = usePatientSelection()
   const { user } = useAuth()
   const notes = useEntityList(() => followUpNotesApi.list())
   const admissions = useEntityList(() => admissionsApi.list())
@@ -36,9 +39,24 @@ export default function FollowUp() {
 
   const canWrite = isDoctorRole(user?.role) || isNurseRole(user?.role)
 
+  function openNew() {
+    // PHASE 11 (area 5): auto-use the shared Patient Selection Context's admission when one is
+    // set, instead of always starting from an empty picker.
+    setForm({ ...emptyForm, admissionId: contextAdmissionId ?? '' })
+    setFormError(null)
+    setModalOpen(true)
+  }
+
   const patientNameByAdmissionId = useMemo(() => {
     const patientNameById = new Map(patients.data.map((p) => [p.id, `${p.firstName} ${p.lastName}`]))
     return new Map(admissions.data.map((a) => [a.id, patientNameById.get(a.patientId) ?? 'Unknown patient']))
+  }, [admissions.data, patients.data])
+
+  // PHASE 11 (area 1): resolve HospitalNumber per admission so the Patient column never has to
+  // fall back to an internal database GUID. See useAdmissionContext.ts for the shared pattern.
+  const hospitalNumberByAdmissionId = useMemo(() => {
+    const hospitalNumberById = new Map(patients.data.map((p) => [p.id, p.hospitalNumber]))
+    return new Map(admissions.data.map((a) => [a.id, hospitalNumberById.get(a.patientId) ?? null]))
   }, [admissions.data, patients.data])
 
   async function handleSubmit(e: FormEvent) {
@@ -80,7 +98,19 @@ export default function FollowUp() {
   )
 
   const columns: Column<FollowUpNoteResponse>[] = [
-    { header: 'Patient', render: (n) => patientNameByAdmissionId.get(n.admissionId) ?? n.admissionId.slice(0, 8) },
+    {
+      header: 'Patient',
+      render: (n) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-text">{patientNameByAdmissionId.get(n.admissionId) ?? 'Unknown admission'}</span>
+          <span className="text-[11.5px] text-text-muted">
+            {hospitalNumberByAdmissionId.get(n.admissionId)
+              ? `Hospital No. ${hospitalNumberByAdmissionId.get(n.admissionId)}`
+              : 'No hospital number assigned'}
+          </span>
+        </div>
+      ),
+    },
     { header: 'When', render: (n) => new Date(n.createdAt).toLocaleString() },
     { header: 'By', render: (n) => roleLabel(n.authorRole) },
     {
@@ -102,7 +132,7 @@ export default function FollowUp() {
         subtitle={`${notes.data.length} note${notes.data.length === 1 ? '' : 's'} across all admissions`}
         action={
           canWrite ? (
-            <PrimaryButton onClick={() => setModalOpen(true)} disabled={admissions.data.length === 0}>
+            <PrimaryButton onClick={openNew} disabled={admissions.data.length === 0}>
               + Add note
             </PrimaryButton>
           ) : (
@@ -126,20 +156,10 @@ export default function FollowUp() {
       <Modal open={modalOpen} title="New follow-up note" onClose={() => setModalOpen(false)}>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
           <Field label="Patient / admission">
-            <Select
-              required
+            <ContextAwareAdmissionField
               value={form.admissionId}
-              onChange={(e) => setForm({ ...form, admissionId: e.target.value })}
-            >
-              <option value="" disabled>
-                Select an admission…
-              </option>
-              {admissions.data.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {patientNameByAdmissionId.get(a.id) ?? a.id.slice(0, 8)} — {new Date(a.admissionTime).toLocaleDateString()}
-                </option>
-              ))}
-            </Select>
+              onSelect={(id) => setForm({ ...form, admissionId: id })}
+            />
           </Field>
 
           <Field label="Type">

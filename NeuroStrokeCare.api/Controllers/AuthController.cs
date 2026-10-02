@@ -187,7 +187,14 @@ namespace NeuroStrokeCare.api.Controllers
         [HttpPut("users/{id:guid}")]
         public async Task<ActionResult<AuthResponse>> UpdateUserAdmin(Guid id, [FromBody] UpdateUserAdminRequest request)
         {
-            var result = await _authService.UpdateUserAdminAsync(id, request.Role, request.EmployeeId);
+            var result = await _authService.UpdateUserAdminAsync(
+                id,
+                request.Role,
+                request.EmployeeId,
+                request.Profession,
+                request.JobTitle,
+                request.AcademicDegree,
+                request.Department);
             if (!result.Success)
                 return BadRequest(result);
 

@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '@/context/AuthContext'
 import { loadAlerts } from '@/lib/alertsApi'
 import UserMenu from '@/components/UserMenu'
+import PatientContextHeader from '@/components/PatientContextHeader'
 import type { ReactElement, SVGProps } from 'react'
 import {
   GridIcon,
@@ -201,6 +202,9 @@ export default function Layout() {
         </nav>
 
         <main className="min-w-0 flex-grow px-4 py-6 sm:px-6 sm:py-8 print:w-full print:p-0 lg:px-10 lg:py-9 lg:pb-12">
+          {/* PHASE 11 (area 4): mounted once here (Layout mounts once per sign-in, not per
+              navigation) so every clinical page gets it for free without importing anything. */}
+          <PatientContextHeader />
           <Outlet />
         </main>
       </div>

@@ -94,8 +94,16 @@ namespace NeuroStrokeCare.api.Controllers
         [HttpGet("{id:guid}")]
         public async Task<ActionResult<LabResultsResponse>> GetById(Guid id, CancellationToken cancellationToken)
         {
+            // FINAL RELEASE-CANDIDATE PASS (section 6, "Soft delete integrity"): CONFIRMED BUG,
+            // FIXED HERE. This GetById used to filter on Id alone, so a soft-deleted row
+            // (CurrentState != Active) was still returned as a normal 200 through this exact
+            // same endpoint any ordinary clinical read uses - there was no separate "admin can
+            // still see deleted records" endpoint being bypassed here, this WAS the only read
+            // path, and it did not distinguish. Adding the CurrentState check makes a
+            // soft-deleted record 404 here, consistent with GetAll/paged (which already filter
+            // on CurrentState) and with how every write endpoint already treats "not found".
             var query = new GetByIdWithFiltersQuery<LabResults, LabResultsResponse>(
-                filter: l => l.Id == id,
+                filter: l => l.Id == id && l.CurrentState == (int)CurrentStatusType.Active,
                 selector: ToResponse);
 
             var result = await _mediator.Send(query, cancellationToken);

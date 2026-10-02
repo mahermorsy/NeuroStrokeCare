@@ -27,5 +27,17 @@ namespace NeuroStrokeCare.Data.UserApplication
         // the API's own /uploads static path (see Program.cs UseStaticFiles).
         public string? EmployeeId { get; set; }
         public string? ProfilePhotoUrl { get; set; }
+
+        // ADDITIONAL CLINICAL UX & STAFF PROFILE TASKS (area 2): optional staff-profile
+        // fields shown on the ID card / staff directory. Nullable/unset for every existing
+        // user until an Admin explicitly fills them in — never defaulted or inferred.
+        // "Profession" = Doctor/Nurse/Pharmacist/Technician/Administrator (broad category);
+        // "JobTitle" = Resident/Specialist/Consultant/Head Nurse (position within that
+        // profession); these are deliberately free-text (not enums) so Admin can describe
+        // roles that don't fit a fixed list without a code change.
+        public string? Profession { get; set; }
+        public string? JobTitle { get; set; }
+        public string? AcademicDegree { get; set; }
+        public string? Department { get; set; }
     }
 }

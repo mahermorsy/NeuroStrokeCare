@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { motion } from 'framer-motion'
 import { useAuth } from '@/context/AuthContext'
 import { entityApi } from '@/lib/entityApi'
@@ -6,7 +6,6 @@ import { useEntityList } from '@/hooks/useEntityList'
 import { useAdmissionContext } from '@/hooks/useAdmissionContext'
 import type {
   AdmissionResponse,
-  PatientResponse,
   NIHSSAssessmentResponse,
   ASPECTSAssessmentResponse,
   ICHAssessmentResponse,
@@ -19,6 +18,8 @@ import type {
 import DataTable, { type Column } from '@/components/DataTable'
 import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
 import Modal from '@/components/Modal'
+import ContextAwareAdmissionField from '@/components/ContextAwareAdmissionField'
+import { usePatientSelection } from '@/context/PatientSelectionContext'
 import { Field, TextInput, Select } from '@/components/FormField'
 import StatusPill from '@/components/StatusPill'
 import { AlertIcon } from '@/components/icons'
@@ -43,7 +44,6 @@ type FieldDef =
   | { type: 'optionalSelect'; key: string; label: string; options: number[] }
 
 const admissionsApi = entityApi<AdmissionResponse>('Admission')
-const patientsApi = entityApi<PatientResponse>('Patient')
 
 const nihss = entityApi<NIHSSAssessmentResponse>('NIHSSAssessment')
 const aspects = entityApi<ASPECTSAssessmentResponse>('ASPECTSAssessment')
@@ -366,7 +366,13 @@ function FieldInput({
 
 function AssessmentTable({ tab }: { tab: TabDef }) {
   const { data, loading, error, reload } = useEntityList<Row>(() => tab.fetch() as Promise<Row[]>, [tab.key])
-  const { patientNameByAdmissionId, loading: contextLoading, error: contextError, reload: reloadContext } = useAdmissionContext()
+  const {
+    patientNameByAdmissionId,
+    hospitalNumberByAdmissionId,
+    loading: contextLoading,
+    error: contextError,
+    reload: reloadContext,
+  } = useAdmissionContext()
 
   const columns: Column<Row>[] = [
     {
@@ -374,7 +380,11 @@ function AssessmentTable({ tab }: { tab: TabDef }) {
       render: (r) => (
         <div className="flex flex-col gap-0.5">
           <span className="font-semibold text-text">{patientNameByAdmissionId.get(r.admissionId) ?? '—'}</span>
-          <span className="text-[11.5px] text-text-muted">Admission #{r.admissionId.slice(0, 8).toUpperCase()}</span>
+          <span className="text-[11.5px] text-text-muted">
+            {hospitalNumberByAdmissionId.get(r.admissionId)
+              ? `Hospital No. ${hospitalNumberByAdmissionId.get(r.admissionId)}`
+              : 'No hospital number assigned'}
+          </span>
         </div>
       ),
     },
@@ -423,16 +433,15 @@ function AssessmentTable({ tab }: { tab: TabDef }) {
 
 export default function Assessments() {
   const { user } = useAuth()
+  const { admissionId: contextAdmissionId } = usePatientSelection()
   const [active, setActive] = useState(TABS[0].key)
   const activeTab = TABS.find((t) => t.key === active) ?? TABS[0]
   const [reloadKey, setReloadKey] = useState(0)
 
+  // Only used now for the "+ New" disabled-state check and the stroke-type-mismatch lookup
+  // below - patient name resolution for the admission picker itself lives in AdmissionPicker,
+  // and the old full-list dropdown (and its name map) was replaced by it.
   const admissions = useEntityList(() => admissionsApi.list())
-  const patients = useEntityList(() => patientsApi.list())
-  const patientNameByAdmissionId = useMemo(() => {
-    const patientNameById = new Map(patients.data.map((p) => [p.id, `${p.firstName} ${p.lastName}`]))
-    return new Map(admissions.data.map((a) => [a.id, patientNameById.get(a.patientId) ?? 'Unknown patient']))
-  }, [admissions.data, patients.data])
 
   const [modalOpen, setModalOpen] = useState(false)
   const [admissionId, setAdmissionId] = useState('')
@@ -450,7 +459,9 @@ export default function Assessments() {
     !activeTab.relevantStrokeTypes.includes(selectedAdmission.strokeType)
 
   function openNew() {
-    setAdmissionId('')
+    // PHASE 11 (area 5): auto-use the shared Patient Selection Context's admission when one is
+    // set, instead of always starting from an empty picker.
+    setAdmissionId(contextAdmissionId ?? '')
     setAssessedAt('')
     setValues(defaultsFor(activeTab.fields))
     setFormError(null)
@@ -537,17 +548,7 @@ export default function Assessments() {
               Assessment context
             </span>
             <Field label="Patient / admission" required>
-              <Select required value={admissionId} onChange={(e) => setAdmissionId(e.target.value)}>
-                <option value="" disabled>
-                  Select an admission…
-                </option>
-                {admissions.data.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {patientNameByAdmissionId.get(a.id) ?? a.id.slice(0, 8)} —{' '}
-                    {new Date(a.admissionTime).toLocaleDateString()}
-                  </option>
-                ))}
-              </Select>
+              <ContextAwareAdmissionField value={admissionId} onSelect={(id) => setAdmissionId(id)} />
             </Field>
 
             <Field label="Assessed at" required>

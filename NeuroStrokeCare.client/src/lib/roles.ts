@@ -27,6 +27,15 @@ export function isNurseRole(role?: string | null) {
   return role === 'Admin' || NURSE_ROLES.includes(role ?? '')
 }
 
+// PHASE 11 (area 7): mirrors the backend's Roles.AnyClinical (AnyDoctor + AnyNurse) - every
+// role that currently exists is clinical, but this stays a named helper (rather than
+// inlining isDoctorRole(...) || isNurseRole(...) at each call site) so a future
+// non-clinical role (e.g. a pure Administrator/receptionist account) only needs updating
+// here, not at every page that gates on it.
+export function isClinicalRole(role?: string | null) {
+  return isDoctorRole(role) || isNurseRole(role)
+}
+
 export function roleLabel(role?: string | null) {
   if (!role) return 'Unknown'
   return ROLE_LABELS[role] ?? role

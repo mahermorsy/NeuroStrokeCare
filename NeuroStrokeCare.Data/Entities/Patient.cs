@@ -10,6 +10,15 @@ namespace NeuroStrokeCare.Data.Entities
     {
 
         public string? NationalId { get; set; }
+
+        // PHASE 11 (area 1): internal hospital/medical-record identifier - the primary
+        // day-to-day search key for clinical staff, deliberately independent from NationalId
+        // (never derived from it). Nullable - existing patients stay null until an Admin/
+        // clinical user explicitly assigns one; nothing backfills this automatically. Unique
+        // when present (see NeuroFlowDbContext's filtered unique index + the explicit
+        // pre-check in PatientController).
+        public string? HospitalNumber { get; set; }
+
         public string FirstName { get; set; }
         public string MiddleName { get; set; }
         public string LastName { get; set; }

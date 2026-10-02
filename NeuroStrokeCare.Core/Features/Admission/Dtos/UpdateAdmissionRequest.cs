@@ -37,5 +37,16 @@ namespace NeuroStrokeCare.Core.Features.Admission.Dtos
         public string? CTFindings { get; set; }
         public string? MRIFindings { get; set; }
         public string? CTAFindings { get; set; }
+
+        // FINAL RELEASE-CANDIDATE PASS (section 4): optional on purpose - no current frontend
+        // caller sends this (admissionsApi.update() has no call sites at all, confirmed by grep),
+        // so making it required would break nothing today but would also gain nothing. If a
+        // caller echoes back the RowVersion it read from AdmissionResponse, AdmissionController.Update
+        // uses that as the optimistic-concurrency check's expected value (true protection against
+        // edits made after this caller's own last read). If omitted, the controller falls back to
+        // the RowVersion it reads itself at the very start of this request (still real protection
+        // against a genuinely concurrent write landing mid-request, just not against staleness
+        // that predates this request).
+        public byte[]? RowVersion { get; set; }
     }
 }

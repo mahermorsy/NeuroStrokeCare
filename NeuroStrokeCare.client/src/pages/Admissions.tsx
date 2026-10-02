@@ -71,6 +71,12 @@ export default function Admissions() {
     () => new Map(patients.data.map((p) => [p.id, `${p.firstName} ${p.lastName}`])),
     [patients.data],
   )
+  // PHASE 11 (area 13): wrong-patient safety - high-impact confirmations (discharge/transfer)
+  // must show patient name + HospitalNumber, not just name.
+  const hospitalNumberByPatientId = useMemo(
+    () => new Map(patients.data.map((p) => [p.id, p.hospitalNumber])),
+    [patients.data],
+  )
   const bedNumberById = useMemo(() => new Map(beds.data.map((b) => [b.id, b.bedNumber])), [beds.data])
   const wardNameById = useMemo(() => new Map(wards.data.map((w) => [w.id, w.name])), [wards.data])
   const wardNameByBedId = useMemo(() => {
@@ -273,6 +279,12 @@ export default function Admissions() {
             </button>
           )}
           <Link
+            to={`/patient-summary/${a.id}`}
+            className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-text-secondary transition-colors duration-150 hover:bg-border-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          >
+            Summary
+          </Link>
+          <Link
             to={`/report/${a.id}`}
             className="rounded-lg border border-border-subtle px-2.5 py-1 text-[12.5px] font-medium text-text-secondary transition-colors duration-150 hover:bg-border-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
@@ -380,7 +392,13 @@ export default function Admissions() {
       <Modal
         open={transferTarget !== null}
         title={`Transfer / update status${
-          transferTarget ? ` — ${patientNameById.get(transferTarget.patientId) ?? 'patient'}` : ''
+          transferTarget
+            ? ` — ${patientNameById.get(transferTarget.patientId) ?? 'patient'}${
+                hospitalNumberByPatientId.get(transferTarget.patientId)
+                  ? ` (Hospital No. ${hospitalNumberByPatientId.get(transferTarget.patientId)})`
+                  : ''
+              }`
+            : ''
         }`}
         onClose={() => setTransferTarget(null)}
       >
@@ -409,8 +427,12 @@ export default function Admissions() {
                 onChange={(e) => setDischargeConfirmed(e.target.checked)}
                 className="mt-0.5"
               />
-              I confirm this ends the admission — the patient will show as discharged/transferred out and this
-              cannot be undone from here.
+              I confirm this ends the admission for{' '}
+              {transferTarget ? patientNameById.get(transferTarget.patientId) ?? 'this patient' : 'this patient'}
+              {transferTarget && hospitalNumberByPatientId.get(transferTarget.patientId)
+                ? ` (Hospital No. ${hospitalNumberByPatientId.get(transferTarget.patientId)})`
+                : ''}
+              {' '}— they will show as discharged/transferred out and this cannot be undone from here.
             </label>
           )}
 

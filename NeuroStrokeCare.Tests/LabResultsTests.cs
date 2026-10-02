@@ -59,9 +59,11 @@ namespace NeuroStrokeCare.Tests
         [Fact]
         public async Task INRAlert_And_GlucoseAlert_AreComputedCorrectly()
         {
-            // These are the one real, currently-implemented "validation-adjacent" rule in
-            // LabResults: computed display-only alert flags (NOT server-side rejection of the
-            // value - see the gap test below). INR > 1.7 and Glucose outside [2.8, 15].
+            // These are display-only alert flags, computed from whatever was actually stored -
+            // separate from (and not a substitute for) the [Range] validation added in the
+            // FINAL RELEASE-CANDIDATE PASS (see Create_WithNegativeValue_IsRejected below).
+            // INR > 1.7 and Glucose outside [2.8, 15] here just mean "flag this as concerning",
+            // not "reject this value" - a real, alarming INR of 9.5 must still be accepted.
             var (doctorClient, doctorId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, "doc_" + nameof(INRAlert_And_GlucoseAlert_AreComputedCorrectly));
             var patientId = await TestDataHelper.SeedPatientAsync(_factory.Services, doctorId);
             var create = await doctorClient.PostAsJsonAsync($"/api/Admission?actingUserId={doctorId}", new CreateAdmissionRequest
@@ -91,15 +93,17 @@ namespace NeuroStrokeCare.Tests
         }
 
         [Fact]
-        public async Task Create_WithClinicallyImpossibleNegativeValues_IsNotRejected()
+        public async Task Create_WithNegativeValue_IsRejected()
         {
-            // GAP (spec area 5, "Lab validation" - "test the ACTUAL currently implemented rules
-            // only"): there is NO server-side range/sanity validation anywhere on LabResultsController
-            // or the LabResults entity - CreateLabResultsRequest has no [Range] attributes, and
-            // LabResultsService is an empty class. INRAlert/GlucoseAlert/PlateletsAlert (tested
-            // above) are read-only *display* flags computed from whatever was stored, not gates
-            // that ever reject a Create/Update call. A negative platelet count is accepted as-is.
-            var (doctorClient, doctorId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, "doc_" + nameof(Create_WithClinicallyImpossibleNegativeValues_IsNotRejected));
+            // FINAL RELEASE-CANDIDATE PASS (section 7, "Lab validation"): CONFIRMED AND FIXED.
+            // All 13 LabResults decimal fields now carry [Range(0, double.MaxValue)] on both
+            // CreateLabResultsRequest and UpdateLabResultsRequest - no invented clinical ceiling,
+            // just the one bound that is impossible for every one of these fields regardless of
+            // clinical judgment (see the comment on CreateLabResultsRequest for why no upper
+            // bound was added). INRAlert/GlucoseAlert/PlateletsAlert (tested above) remain
+            // read-only *display* flags, unrelated to this validation. This test used to
+            // document the opposite (gap) behavior - a negative platelet count being accepted.
+            var (doctorClient, doctorId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, "doc_" + nameof(Create_WithNegativeValue_IsRejected));
             var patientId = await TestDataHelper.SeedPatientAsync(_factory.Services, doctorId);
             var create = await doctorClient.PostAsJsonAsync($"/api/Admission?actingUserId={doctorId}", new CreateAdmissionRequest
             {
@@ -109,12 +113,40 @@ namespace NeuroStrokeCare.Tests
             });
             var admissionId = await create.Content.ReadFromJsonAsync<Guid>();
 
-            var (nurseClient, nurseId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Nurse, "nurse_" + nameof(Create_WithClinicallyImpossibleNegativeValues_IsNotRejected));
+            var (nurseClient, nurseId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Nurse, "nurse_" + nameof(Create_WithNegativeValue_IsRejected));
             var response = await nurseClient.PostAsJsonAsync($"/api/LabResults?actingUserId={nurseId}", new CreateLabResultsRequest
             {
                 AdmissionId = admissionId,
                 RecordedAt = DateTime.UtcNow,
-                Platelets = -50, // clinically impossible, accepted anyway
+                Platelets = -50, // clinically impossible - now rejected
+            });
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task Create_WithValidNonNegativeValues_StillSucceeds()
+        {
+            // Backward-compatible sanity check: ordinary, realistic (even if clinically alarming)
+            // values must still be accepted - the new validation only rejects negative values,
+            // it does not add an invented upper ceiling that could block a genuine extreme reading.
+            var (doctorClient, doctorId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, "doc_" + nameof(Create_WithValidNonNegativeValues_StillSucceeds));
+            var patientId = await TestDataHelper.SeedPatientAsync(_factory.Services, doctorId);
+            var create = await doctorClient.PostAsJsonAsync($"/api/Admission?actingUserId={doctorId}", new CreateAdmissionRequest
+            {
+                PatientId = patientId,
+                AdmissionTime = DateTime.UtcNow,
+                Status = PatientStatus.Emergency,
+            });
+            var admissionId = await create.Content.ReadFromJsonAsync<Guid>();
+
+            var (nurseClient, nurseId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Nurse, "nurse_" + nameof(Create_WithValidNonNegativeValues_StillSucceeds));
+            var response = await nurseClient.PostAsJsonAsync($"/api/LabResults?actingUserId={nurseId}", new CreateLabResultsRequest
+            {
+                AdmissionId = admissionId,
+                RecordedAt = DateTime.UtcNow,
+                INR = 9.5m, // dangerously high but real - must not be rejected
+                Platelets = 0, // boundary value (zero), must be accepted
             });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
