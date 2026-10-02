@@ -122,8 +122,13 @@ export default function Report() {
 
       <Card className="flex flex-col gap-5 print:border-none print:p-0 print:shadow-none">
         <div className="hidden print:block">
-          <h1 className="text-[20px] font-semibold text-text">NeuroStrokeCare — Patient Report</h1>
-          <p className="text-[12.5px] text-text-muted">Mansoura University Hospital · generated {new Date().toLocaleString()}</p>
+          <img
+            src="/brand/NeuroStrokeCare_Logo.svg"
+            alt="NeuroStrokeCare — Mansoura University Hospital"
+            className="mb-2 h-auto w-full max-w-[260px] rounded-lg object-contain"
+          />
+          <h1 className="text-[20px] font-semibold text-text">Patient Report</h1>
+          <p className="text-[12.5px] text-text-muted">generated {new Date().toLocaleString()}</p>
         </div>
 
         <Section title="Patient">

@@ -4,4 +4,5 @@
   <Project Path="NeuroStrokeCare.Data/NeuroStrokeCare.Data.csproj" />
   <Project Path="NeuroStrokeCare.infrastructure/NeuroStrokeCare.infrastructure.csproj" />
   <Project Path="NeuroStrokeCare.Service/NeuroStrokeCare.Service.csproj" />
+  <Project Path="NeuroStrokeCare.Tests/NeuroStrokeCare.Tests.csproj" />
 </Solution>

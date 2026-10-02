@@ -2,7 +2,6 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useAuth } from '@/context/AuthContext'
-import { LogoMark } from '@/components/icons'
 
 export default function Login() {
   const { login, isLoading, error } = useAuth()
@@ -32,13 +31,11 @@ export default function Login() {
         className="w-full max-w-[380px] rounded-2xl border border-border bg-surface p-9 shadow-sm"
       >
         <div className="mb-7 flex flex-col items-center gap-3 text-center">
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent">
-            <LogoMark className="h-7 w-7" />
-          </span>
-          <div>
-            <h1 className="font-display text-[22px] font-semibold text-text">NeuroStrokeCare</h1>
-            <p className="mt-1 text-[13px] text-text-secondary">Mansoura University Hospital</p>
-          </div>
+          <img
+            src="/brand/NeuroStrokeCare_Logo.svg"
+            alt="NeuroStrokeCare — Mansoura University Hospital"
+            className="h-auto w-full max-w-[300px] rounded-xl object-contain"
+          />
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

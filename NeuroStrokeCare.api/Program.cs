@@ -168,3 +168,8 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// Phase 9 (Tests): minimal testability change - top-level-statement Program is internal by
+// default, which blocks WebApplicationFactory<Program> from NeuroStrokeCare.Tests. This
+// partial class only makes it public; it adds no behavior.
+public partial class Program { }

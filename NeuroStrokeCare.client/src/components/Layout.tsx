@@ -19,7 +19,6 @@ import {
   UsersIcon,
   MenuIcon,
   CloseIcon,
-  LogoMark,
 } from '@/components/icons'
 
 interface NavItem {
@@ -102,9 +101,11 @@ export default function Layout() {
         >
           <MenuIcon className="h-5 w-5" />
         </button>
-        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[9px] bg-accent ring-1 ring-gold/30">
-          <LogoMark className="h-[18px] w-[18px]" />
-        </span>
+        <img
+          src="/brand/WindowIcon.svg"
+          alt="NeuroStrokeCare"
+          className="h-8 w-8 flex-shrink-0 rounded-[9px] object-cover ring-1 ring-gold/30"
+        />
         <span className="font-display text-[15px] font-semibold text-text">NeuroStrokeCare</span>
       </header>
 
@@ -137,9 +138,11 @@ export default function Layout() {
           <div className="flex items-center justify-between gap-2 px-[10px] lg:justify-start">
             <div className="flex flex-col gap-[7px]">
               <div className="flex items-center gap-[11px]">
-                <span className="flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-[11px] bg-accent shadow-[0_1px_3px_rgba(0,0,0,0.35)] ring-1 ring-gold/40">
-                  <LogoMark className="h-[22px] w-[22px]" />
-                </span>
+                <img
+                  src="/brand/WindowIcon.svg"
+                  alt="NeuroStrokeCare"
+                  className="h-[38px] w-[38px] flex-shrink-0 rounded-[11px] object-cover shadow-[0_1px_3px_rgba(0,0,0,0.35)] ring-1 ring-gold/40"
+                />
                 <span className="font-display text-[18px] font-semibold leading-tight text-white">
                   NeuroStrokeCare
                 </span>

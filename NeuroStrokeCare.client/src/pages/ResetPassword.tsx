@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { LogoMark } from '@/components/icons'
 import { resetPassword } from '@/lib/passwordResetApi'
 import { describeApiError } from '@/lib/apiError'
 
@@ -52,9 +51,11 @@ export default function ResetPassword() {
         className="w-full max-w-[380px] rounded-2xl border border-border bg-surface p-9 shadow-sm"
       >
         <div className="mb-7 flex flex-col items-center gap-3 text-center">
-          <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent">
-            <LogoMark className="h-7 w-7" />
-          </span>
+          <img
+            src="/brand/NeuroStrokeCare_Logo.svg"
+            alt="NeuroStrokeCare — Mansoura University Hospital"
+            className="h-auto w-full max-w-[280px] rounded-xl object-contain"
+          />
           <h1 className="font-display text-[20px] font-semibold text-text">Set a new password</h1>
         </div>
 

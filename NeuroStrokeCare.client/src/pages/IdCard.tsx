@@ -4,7 +4,6 @@ import { useEntityList } from '@/hooks/useEntityList'
 import { usersApi } from '@/lib/usersApi'
 import { useAuth } from '@/context/AuthContext'
 import PageHeader, { Card } from '@/components/PageHeader'
-import { LogoMark } from '@/components/icons'
 import { roleLabel } from '@/lib/roles'
 import { describeApiError } from '@/lib/apiError'
 
@@ -77,9 +76,11 @@ export default function IdCard() {
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(179,136,44,0.18),transparent_55%)]" />
             <div className="relative flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <span className="flex h-9 w-9 items-center justify-center rounded-[9px] bg-accent ring-1 ring-gold/50">
-                  <LogoMark className="h-5 w-5" />
-                </span>
+                <img
+                  src="/brand/WindowIcon.svg"
+                  alt="NeuroStrokeCare"
+                  className="h-9 w-9 rounded-[9px] object-cover ring-1 ring-gold/50"
+                />
                 <div className="flex flex-col leading-tight">
                   <span className="font-display text-[14px] font-semibold text-white">NeuroStrokeCare</span>
                   <span className="text-[10px] text-sidebar-muted">Mansoura University Hospital</span>
