@@ -146,6 +146,14 @@ if (app.Environment.IsProduction())
 // expose domain failures gets its own status code below; anything not on that list still falls
 // through to the original flat 500 (detail hidden outside Development) exactly as before - this
 // deliberately does not try to guess a status code for every possible exception type.
+static Exception? UnwrapDataAccessException(Exception? exception)
+{
+    while (exception is DataAccessException dataAccessException && dataAccessException.InnerException != null)
+        exception = dataAccessException.InnerException;
+
+    return exception;
+}
+
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
@@ -153,9 +161,7 @@ app.UseExceptionHandler(errorApp =>
         var exceptionFeature = context.Features.Get<IExceptionHandlerFeature>();
         var exception = exceptionFeature?.Error;
 
-        var toInspect = exception is DataAccessException dataAccessEx && dataAccessEx.InnerException != null
-            ? dataAccessEx.InnerException
-            : exception;
+        var toInspect = UnwrapDataAccessException(exception);
 
         int statusCode;
         string message;

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using NeuroStrokeCare.infrastructure.Context;
 
 namespace NeuroStrokeCare.Tests
@@ -39,10 +40,19 @@ namespace NeuroStrokeCare.Tests
 
             builder.ConfigureServices(services =>
             {
-                var dbContextDescriptor = services.SingleOrDefault(
-                    d => d.ServiceType == typeof(DbContextOptions<NeuroFlowDbContext>));
-                if (dbContextDescriptor != null)
-                    services.Remove(dbContextDescriptor);
+                services.RemoveAll<DbContextOptions<NeuroFlowDbContext>>();
+                services.RemoveAll<DbContextOptions>();
+
+                // Newer EF Core AddDbContext registrations also add provider-specific
+                // IDbContextOptionsConfiguration<TContext> services. If the original SQL
+                // Server configuration is left here alongside SQLite, EF sees two providers
+                // in the final test service provider and refuses to start.
+                foreach (var descriptor in services
+                    .Where(d => d.ServiceType.FullName?.Contains("IDbContextOptionsConfiguration") == true)
+                    .ToList())
+                {
+                    services.Remove(descriptor);
+                }
 
                 // One shared, open connection for the whole factory lifetime - an in-memory
                 // SQLite database is destroyed the moment its only connection closes, so every

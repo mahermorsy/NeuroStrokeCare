@@ -93,6 +93,86 @@ namespace NeuroStrokeCare.Tests
         }
 
         [Fact]
+        public async Task PatientSearch_ByHospitalNumber_ReturnsEligiblePatient()
+        {
+            var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(PatientSearch_ByHospitalNumber_ReturnsEligiblePatient));
+            var hospitalNumber = "HOSP-" + Guid.NewGuid().ToString("N")[..8];
+            var patientId = await TestDataHelper.SeedPatientAsync(
+                _factory.Services,
+                userId,
+                hospitalNumber: hospitalNumber,
+                firstName: "Eligible",
+                lastName: "Hospital");
+
+            var response = await client.GetAsync($"/api/Admission/patient-search?query={hospitalNumber}");
+            var results = await response.Content.ReadFromJsonAsync<List<AdmissionPatientSearchResultResponse>>();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = Assert.Single(results!);
+            Assert.Equal(patientId, result.PatientId);
+            Assert.Equal(hospitalNumber, result.HospitalNumber);
+        }
+
+        [Fact]
+        public async Task PatientSearch_ByNationalId_ReturnsMaskedEligiblePatient()
+        {
+            var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(PatientSearch_ByNationalId_ReturnsMaskedEligiblePatient));
+            var nationalId = "29801011234567";
+            var patientId = await TestDataHelper.SeedPatientAsync(
+                _factory.Services,
+                userId,
+                nationalId: nationalId,
+                hospitalNumber: "NAT-" + Guid.NewGuid().ToString("N")[..8],
+                firstName: "Eligible",
+                lastName: "National");
+
+            var response = await client.GetAsync($"/api/Admission/patient-search?query={nationalId}");
+            var results = await response.Content.ReadFromJsonAsync<List<AdmissionPatientSearchResultResponse>>();
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = Assert.Single(results!);
+            Assert.Equal(patientId, result.PatientId);
+            Assert.Equal("••••••••••4567", result.NationalIdMasked);
+        }
+
+        [Fact]
+        public async Task PatientSearch_ExcludesOpenAdmissionPatients_AndRejectsExactActiveMatch()
+        {
+            var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(PatientSearch_ExcludesOpenAdmissionPatients_AndRejectsExactActiveMatch));
+            var prefix = "ELIG-" + Guid.NewGuid().ToString("N")[..6];
+            var eligiblePatientId = await TestDataHelper.SeedPatientAsync(
+                _factory.Services,
+                userId,
+                hospitalNumber: $"{prefix}-A",
+                firstName: "Eligible",
+                lastName: "OpenFilter");
+            var activePatientId = await TestDataHelper.SeedPatientAsync(
+                _factory.Services,
+                userId,
+                hospitalNumber: $"{prefix}-B",
+                firstName: "Active",
+                lastName: "OpenFilter");
+
+            var create = await client.PostAsJsonAsync($"/api/Admission?actingUserId={userId}", new CreateAdmissionRequest
+            {
+                PatientId = activePatientId,
+                AdmissionTime = DateTime.UtcNow,
+                Status = PatientStatus.Emergency,
+            });
+            Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+
+            var partialSearch = await client.GetAsync($"/api/Admission/patient-search?query={prefix}");
+            var partialResults = await partialSearch.Content.ReadFromJsonAsync<List<AdmissionPatientSearchResultResponse>>();
+
+            Assert.Equal(HttpStatusCode.OK, partialSearch.StatusCode);
+            Assert.Contains(partialResults!, p => p.PatientId == eligiblePatientId);
+            Assert.DoesNotContain(partialResults!, p => p.PatientId == activePatientId);
+
+            var exactActiveSearch = await client.GetAsync($"/api/Admission/patient-search?query={prefix}-B");
+            Assert.Equal(HttpStatusCode.Conflict, exactActiveSearch.StatusCode);
+        }
+
+        [Fact]
         public async Task Transfer_ToDischarged_ReleasesBed()
         {
             var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(Transfer_ToDischarged_ReleasesBed));
@@ -180,26 +260,10 @@ namespace NeuroStrokeCare.Tests
             Assert.Equal(HttpStatusCode.Conflict, secondTransfer.StatusCode);
         }
 
-        // --- Discrepancy-documenting tests below: these describe GAPS against the Phase 9
-        // spec's expectations, found by reading AdmissionController.cs directly. They assert
-        // the CURRENT (gap) behavior so a future fix shows up as a changed/failing test here,
-        // rather than silently going unnoticed. See PHASE9_REPORT.md section "Discrepancies".
-
         [Fact]
-        public async Task Create_WithNonExistentPatientId_DoesNotReturnAFriendlyError()
+        public async Task Create_WithNonExistentPatientId_ReturnsNotFound()
         {
-            // GAP: AdmissionController.Create never checks that request.PatientId refers to an
-            // existing (or active) Patient - it only checks (a) no open admission already exists
-            // for that id, and (b) bed vacancy. A missing patient therefore falls straight through
-            // to _context.SaveChangesAsync, where only two *named unique-index* violations are
-            // translated to a friendly Conflict; anything else (including a PatientId FK violation
-            // on SQL Server) is rethrown as-is and hits Program.cs's catch-all handler -> 500.
-            //
-            // On SQLite (this test's provider) FK enforcement is OFF by default and this
-            // project's test DbContext does not turn it on, so the same call may simply SUCCEED
-            // here instead of failing at all - a second, independent gap on top of the first.
-            // Both behaviors are wrong for a clinical system; neither is a clean 404/400.
-            var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(Create_WithNonExistentPatientId_DoesNotReturnAFriendlyError));
+            var (client, userId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, nameof(Create_WithNonExistentPatientId_ReturnsNotFound));
 
             var response = await client.PostAsJsonAsync($"/api/Admission?actingUserId={userId}", new CreateAdmissionRequest
             {
@@ -208,11 +272,7 @@ namespace NeuroStrokeCare.Tests
                 Status = PatientStatus.Emergency,
             });
 
-            // Document whichever it actually is, instead of asserting the spec's intended 404/400.
-            Assert.True(
-                response.StatusCode is HttpStatusCode.Created or HttpStatusCode.InternalServerError,
-                $"Expected either the SQLite gap (silently succeeds: 201) or the general-exception-handler gap (500), got {response.StatusCode}. " +
-                "If this now returns 404/400, the missing-patient guard was added - update this test to assert that instead.");
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
 
         [Fact]

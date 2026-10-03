@@ -120,21 +120,16 @@ namespace NeuroStrokeCare.Tests
             Assert.NotNull(afterPut.ThrombolysisGivenAt);
         }
 
-        // --- Further discrepancy-documenting tests (no validation exists on this endpoint) ---
-
         [Fact]
-        public async Task RecordThrombolysis_EmptyDrugString_IsNotRejected()
+        public async Task RecordThrombolysis_EmptyDrugString_IsRejected()
         {
-            // GAP: `[FromQuery] string drug` has no [Required]/length validation of its own, and
-            // an empty string "" still satisfies ASP.NET Core's implicit non-nullable-reference-type
-            // requirement (which only rejects a *missing* value, not an empty one).
-            var (client, userId, admissionId) = await CreateOpenAdmissionAsync(nameof(RecordThrombolysis_EmptyDrugString_IsNotRejected));
+            var (client, userId, admissionId) = await CreateOpenAdmissionAsync(nameof(RecordThrombolysis_EmptyDrugString_IsRejected));
 
             var response = await client.PatchAsync(
                 $"/api/Admission/{admissionId}/thrombolysis?actingUserId={userId}&drug=&doseMg=5",
                 content: null);
 
-            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
         [Fact]

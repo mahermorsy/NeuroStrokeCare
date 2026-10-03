@@ -42,6 +42,8 @@ namespace NeuroStrokeCare.api.Controllers
             {
                 Id = a.Id,
                 PatientId = a.PatientId,
+                PatientName = a.Patient.FirstName + " " + a.Patient.LastName,
+                PatientHospitalNumber = a.Patient.HospitalNumber,
                 AdmissionTime = a.AdmissionTime,
                 Status = a.Status,
                 StrokeType = a.StrokeType,
@@ -57,6 +59,10 @@ namespace NeuroStrokeCare.api.Controllers
                 CTFindings = a.CTFindings,
                 MRIFindings = a.MRIFindings,
                 CTAFindings = a.CTAFindings,
+                ThrombolysisGivenAt = a.ThrombolysisGivenAt,
+                ThrombolysisDrug = a.ThrombolysisDrug,
+                ThrombolysisDoseMg = a.ThrombolysisDoseMg,
+                ThrombolysisRecordedById = a.ThrombolysisRecordedById,
                 RowVersion = a.RowVersion
             };
         #endregion
@@ -195,6 +201,80 @@ namespace NeuroStrokeCare.api.Controllers
             return Ok(results);
         }
 
+        // GET: api/admission/patient-search?query=...
+        // Used only by the New Admission flow: find active patients by HospitalNumber/NationalId
+        // without loading the whole patient table into the browser. Results are restricted to
+        // patients who do not already have an active/open admission; Create re-checks the same
+        // rule before saving, so the UI cannot be the only line of defense.
+        [Authorize(Roles = Roles.AnyDoctor)]
+        [HttpGet("patient-search")]
+        public async Task<ActionResult<List<AdmissionPatientSearchResultResponse>>> PatientSearch(
+            [FromQuery] string? query,
+            [FromQuery] int take = 10,
+            CancellationToken cancellationToken = default)
+        {
+            var term = query?.Trim();
+            if (string.IsNullOrWhiteSpace(term) || term.Length < 2)
+                return Ok(new List<AdmissionPatientSearchResultResponse>());
+
+            take = Math.Clamp(take, 1, 20);
+
+            var exactPatientId = await _context.Set<Patient>()
+                .AsNoTracking()
+                .Where(p => p.CurrentState == (int)CurrentStatusType.Active &&
+                            (p.HospitalNumber == term || p.NationalId == term))
+                .Select(p => (Guid?)p.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (exactPatientId.HasValue)
+            {
+                var exactPatientHasOpenAdmission = await _context.Set<Admission>().AnyAsync(
+                    a => a.PatientId == exactPatientId.Value &&
+                         a.CurrentState == (int)CurrentStatusType.Active &&
+                         a.DischargeTime == null,
+                    cancellationToken);
+
+                if (exactPatientHasOpenAdmission)
+                    return Conflict(new { message = "Patient already has an active admission." });
+            }
+
+            var patients = await _context.Set<Patient>()
+                .AsNoTracking()
+                .Where(p => p.CurrentState == (int)CurrentStatusType.Active)
+                .Where(p =>
+                    (p.HospitalNumber != null && p.HospitalNumber.Contains(term)) ||
+                    (p.NationalId != null && p.NationalId.Contains(term)))
+                .Where(p => !_context.Set<Admission>().Any(a =>
+                    a.PatientId == p.Id &&
+                    a.CurrentState == (int)CurrentStatusType.Active &&
+                    a.DischargeTime == null))
+                .OrderBy(p => p.HospitalNumber == term
+                    ? 0
+                    : p.NationalId == term
+                        ? 1
+                        : p.HospitalNumber != null && p.HospitalNumber.StartsWith(term)
+                            ? 2
+                            : p.NationalId != null && p.NationalId.StartsWith(term)
+                                ? 3
+                                : 4)
+                .ThenBy(p => p.LastName)
+                .ThenBy(p => p.FirstName)
+                .Take(take)
+                .Select(p => new AdmissionPatientSearchResultResponse
+                {
+                    PatientId = p.Id,
+                    FullName = p.FirstName + " " + p.MiddleName + " " + p.LastName,
+                    HospitalNumber = p.HospitalNumber,
+                    NationalIdMasked = p.NationalId
+                })
+                .ToListAsync(cancellationToken);
+
+            foreach (var patient in patients)
+                patient.NationalIdMasked = MaskNationalId(patient.NationalIdMasked);
+
+            return Ok(patients);
+        }
+
         // بيسيب آخر 4 خانات بس ظاهرة - "•••••••1234" - مستخدمة في نتائج البحث فوق فقط،
         // الـ Endpoints التانية (GetById بتاع Patient مثلاً) لسه بترجع الرقم القومي كامل
         // لمن عنده صلاحية يشوف الملف الكامل.
@@ -249,6 +329,16 @@ namespace NeuroStrokeCare.api.Controllers
             [FromQuery] Guid actingUserId,
             CancellationToken cancellationToken)
         {
+            if (request.AdmissionTime == default)
+                return BadRequest(new { message = "Admission time is required." });
+
+            var patientExists = await _context.Set<Patient>().AnyAsync(
+                p => p.Id == request.PatientId && p.CurrentState == (int)CurrentStatusType.Active,
+                cancellationToken);
+
+            if (!patientExists)
+                return NotFound(new { message = "Patient not found." });
+
             var hasOpenAdmission = await _context.Set<Admission>().AnyAsync(
                 a => a.PatientId == request.PatientId &&
                      a.CurrentState == (int)CurrentStatusType.Active &&
@@ -256,7 +346,7 @@ namespace NeuroStrokeCare.api.Controllers
                 cancellationToken);
 
             if (hasOpenAdmission)
-                return Conflict(new { message = "This patient already has an open admission — discharge or transfer it before admitting them again." });
+                return Conflict(new { message = "Patient already has an active admission." });
 
             Bed? bed = null;
             if (request.BedId.HasValue)
@@ -301,7 +391,7 @@ namespace NeuroStrokeCare.api.Controllers
                     return Conflict(new { message = "This bed was just taken by another admission — pick a different bed." });
 
                 if (IsUniqueIndexViolation(ex, "IX_Admissions_PatientId"))
-                    return Conflict(new { message = "This patient already has an open admission — discharge or transfer it before admitting them again." });
+                    return Conflict(new { message = "Patient already has an active admission." });
 
                 throw;
             }

@@ -41,7 +41,7 @@ namespace NeuroStrokeCare.Tests
 
         private async Task<Guid> SeedOccupiedBedWithActiveAdmissionAsync(string testName, Guid wardId)
         {
-            var bedId = await TestDataHelper.SeedBedAsync(_factory.Services, wardId, BedStatus.Occupied);
+            var bedId = await TestDataHelper.SeedBedAsync(_factory.Services, wardId, BedStatus.Vacant);
 
             var (doctorClient, doctorUserId) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Resident, testName + "_Doctor");
             var patientId = await TestDataHelper.SeedPatientAsync(_factory.Services, doctorUserId);
@@ -73,7 +73,7 @@ namespace NeuroStrokeCare.Tests
                 Status = BedStatus.Vacant, // tries to flip an occupied bed to vacant
             });
 
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
 
         [Fact]

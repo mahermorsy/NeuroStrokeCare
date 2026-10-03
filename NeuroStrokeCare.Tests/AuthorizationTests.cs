@@ -42,6 +42,24 @@ namespace NeuroStrokeCare.Tests
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
 
+        [Fact]
+        public async Task UnauthenticatedRequest_ToAdmissionPatientSearch_Returns401()
+        {
+            var client = _factory.CreateClient();
+            var response = await client.GetAsync("/api/Admission/patient-search?query=HN");
+
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task WrongRole_AdmissionPatientSearch_Returns403()
+        {
+            var (client, _) = await TestDataHelper.CreateAuthorizedClientAsync(_factory, Roles.Nurse, nameof(WrongRole_AdmissionPatientSearch_Returns403));
+            var response = await client.GetAsync("/api/Admission/patient-search?query=HN");
+
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+
         [Theory]
         [InlineData(Roles.Admin)]
         [InlineData(Roles.Consultant)]

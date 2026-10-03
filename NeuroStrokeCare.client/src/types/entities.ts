@@ -34,6 +34,8 @@ export interface PatientResponse {
 export interface AdmissionResponse {
   id: string
   patientId: string
+  patientName: string
+  patientHospitalNumber: string | null
   admissionTime: string
   status: number
   strokeType: number | null
@@ -188,6 +190,13 @@ export interface AdmissionSearchResultResponse {
   wardName: string | null
   bedNumber: string | null
   admissionTime: string
+}
+
+export interface AdmissionPatientSearchResultResponse {
+  patientId: string
+  fullName: string
+  hospitalNumber: string | null
+  nationalIdMasked: string | null
 }
 
 export interface PendingUserResponse {

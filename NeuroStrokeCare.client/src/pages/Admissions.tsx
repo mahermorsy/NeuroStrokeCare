@@ -1,10 +1,16 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { entityApi } from '@/lib/entityApi'
 import { useEntityList } from '@/hooks/useEntityList'
-import type { AdmissionResponse, PatientResponse, BedResponse, WardResponse } from '@/types/entities'
+import type {
+  AdmissionPatientSearchResultResponse,
+  AdmissionResponse,
+  PatientResponse,
+  BedResponse,
+  WardResponse,
+} from '@/types/entities'
 import DataTable, { type Column } from '@/components/DataTable'
 import PageHeader, { Card, PrimaryButton } from '@/components/PageHeader'
 import Modal from '@/components/Modal'
@@ -16,6 +22,7 @@ import { isOpenAdmission } from '@/lib/admissions'
 import { describeApiError } from '@/lib/apiError'
 import { transferAdmission } from '@/lib/admissionTransferApi'
 import { setAdmissionStrokeType } from '@/lib/admissionStrokeTypeApi'
+import { searchAdmissionPatients } from '@/lib/admissionPatientSearchApi'
 
 const admissionsApi = entityApi<AdmissionResponse>('Admission')
 const patientsApi = entityApi<PatientResponse>('Patient')
@@ -33,6 +40,11 @@ const emptyForm = {
   admissionTime: '',
   status: 1,
   bedId: '',
+}
+
+function toDateTimeLocalValue(date = new Date()) {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return localDate.toISOString().slice(0, 16)
 }
 
 function statusTone(label: string): 'success' | 'warning' | 'critical' | 'info' {
@@ -53,6 +65,11 @@ export default function Admissions() {
   const [form, setForm] = useState(emptyForm)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [patientQuery, setPatientQuery] = useState('')
+  const [patientResults, setPatientResults] = useState<AdmissionPatientSearchResultResponse[]>([])
+  const [patientSearchLoading, setPatientSearchLoading] = useState(false)
+  const [patientSearchError, setPatientSearchError] = useState<string | null>(null)
+  const [selectedPatient, setSelectedPatient] = useState<AdmissionPatientSearchResultResponse | null>(null)
   const canManage = isDoctorRole(user?.role)
 
   const [transferTarget, setTransferTarget] = useState<AdmissionResponse | null>(null)
@@ -88,9 +105,81 @@ export default function Admissions() {
     return map
   }, [beds.data, wardNameById])
 
+  useEffect(() => {
+    const query = patientQuery.trim()
+
+    if (!modalOpen || selectedPatient || query.length < 2) {
+      setPatientResults([])
+      setPatientSearchLoading(false)
+      setPatientSearchError(null)
+      return
+    }
+
+    const controller = new AbortController()
+    const timeout = window.setTimeout(async () => {
+      setPatientSearchLoading(true)
+      setPatientSearchError(null)
+      try {
+        const results = await searchAdmissionPatients(query, controller.signal)
+        setPatientResults(results)
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setPatientResults([])
+          setPatientSearchError(
+            describeApiError(err, {
+              409: 'This patient already has an active admission.',
+              403: 'Only doctors can search eligible patients for a new admission.',
+            }),
+          )
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setPatientSearchLoading(false)
+        }
+      }
+    }, 350)
+
+    return () => {
+      controller.abort()
+      window.clearTimeout(timeout)
+    }
+  }, [modalOpen, patientQuery, selectedPatient])
+
+  function openNewAdmissionModal() {
+    setForm({ ...emptyForm, admissionTime: toDateTimeLocalValue() })
+    setFormError(null)
+    setPatientQuery('')
+    setPatientResults([])
+    setPatientSearchError(null)
+    setSelectedPatient(null)
+    setModalOpen(true)
+  }
+
+  function choosePatient(patient: AdmissionPatientSearchResultResponse) {
+    setSelectedPatient(patient)
+    setForm((current) => ({ ...current, patientId: patient.patientId }))
+    setPatientQuery('')
+    setPatientResults([])
+    setPatientSearchError(null)
+  }
+
+  function clearSelectedPatient() {
+    setSelectedPatient(null)
+    setForm((current) => ({ ...current, patientId: '' }))
+    setPatientQuery('')
+    setPatientResults([])
+    setPatientSearchError(null)
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!user?.userId) return
+    if (submitting) return
+    if (!form.patientId || !selectedPatient) {
+      setFormError('Select an eligible patient before saving the admission.')
+      return
+    }
+
     setSubmitting(true)
     setFormError(null)
     try {
@@ -105,6 +194,7 @@ export default function Admissions() {
       )
       setModalOpen(false)
       setForm(emptyForm)
+      clearSelectedPatient()
       admissions.reload()
       beds.reload()
     } catch (err) {
@@ -302,18 +392,12 @@ export default function Admissions() {
         subtitle={`${admissions.data.length} admission${admissions.data.length === 1 ? '' : 's'} on record`}
         action={
           canManage ? (
-            <div className="flex flex-col items-end gap-1">
-              <PrimaryButton
-                onClick={() => setModalOpen(true)}
-                disabled={patients.data.length === 0}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
-              >
-                + New admission
-              </PrimaryButton>
-              {patients.data.length === 0 && (
-                <span className="text-[12px] text-text-muted">Add a patient first</span>
-              )}
-            </div>
+            <PrimaryButton
+              onClick={openNewAdmissionModal}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2"
+            >
+              + New admission
+            </PrimaryButton>
           ) : (
             <span className="text-[12.5px] text-text-muted">Only doctors can admit or transfer patients</span>
           )
@@ -336,18 +420,71 @@ export default function Admissions() {
 
       <Modal open={modalOpen} title="New admission" onClose={() => setModalOpen(false)}>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
-          <Field label="Patient">
-            <Select required value={form.patientId} onChange={(e) => setForm({ ...form, patientId: e.target.value })}>
-              <option value="" disabled>
-                Select a patient…
-              </option>
-              {patients.data.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.firstName} {p.lastName}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[13px] font-semibold text-text-secondary">Patient</span>
+            {selectedPatient ? (
+              <div className="flex flex-col gap-2 rounded-xl border border-accent/35 bg-accent/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-[14px] font-semibold text-text">{selectedPatient.fullName}</p>
+                  <p className="mt-0.5 text-[12.5px] text-text-muted">
+                    Hospital No. {selectedPatient.hospitalNumber ?? '—'}
+                    {selectedPatient.nationalIdMasked ? ` · National ID ${selectedPatient.nationalIdMasked}` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearSelectedPatient}
+                  className="self-start rounded-lg border border-border-subtle px-3 py-1.5 text-[12.5px] font-medium text-text-secondary transition-colors duration-150 hover:bg-border-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 sm:self-auto"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <>
+                <TextInput
+                  type="search"
+                  value={patientQuery}
+                  onChange={(e) => setPatientQuery(e.target.value)}
+                  placeholder="Search by Hospital No. or National ID"
+                  autoComplete="off"
+                />
+                <span className="text-[12px] text-text-muted">Type at least 2 characters. Patients with an active admission are excluded.</span>
+
+                {patientSearchLoading && (
+                  <p className="rounded-lg bg-border-soft px-3 py-2 text-[12.5px] font-medium text-text-secondary">Searching…</p>
+                )}
+
+                {patientSearchError && (
+                  <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{patientSearchError}</p>
+                )}
+
+                {!patientSearchLoading && patientQuery.trim().length >= 2 && !patientSearchError && patientResults.length === 0 && (
+                  <p className="rounded-lg border border-dashed border-border-subtle px-3 py-2 text-[12.5px] text-text-muted">
+                    No eligible patient found.
+                  </p>
+                )}
+
+                {patientResults.length > 0 && (
+                  <div className="max-h-56 overflow-y-auto rounded-xl border border-border-subtle bg-white">
+                    {patientResults.map((patient) => (
+                      <button
+                        key={patient.patientId}
+                        type="button"
+                        onClick={() => choosePatient(patient)}
+                        className="flex w-full flex-col items-start gap-1 border-b border-border-soft px-3 py-2.5 text-left last:border-b-0 transition-colors duration-150 hover:bg-accent/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
+                      >
+                        <span className="text-[14px] font-semibold text-text">{patient.fullName}</span>
+                        <span className="text-[12.5px] text-text-muted">
+                          Hospital No. {patient.hospitalNumber ?? '—'}
+                          {patient.nationalIdMasked ? ` · National ID ${patient.nationalIdMasked}` : ''}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
           <Field label="Admission time">
             <TextInput
               type="datetime-local"
@@ -383,7 +520,7 @@ export default function Admissions() {
             <p className="rounded-lg bg-critical-bg px-3 py-2 text-[13px] font-medium text-critical">{formError}</p>
           )}
 
-          <PrimaryButton type="submit" disabled={submitting}>
+          <PrimaryButton type="submit" disabled={submitting || !selectedPatient}>
             {submitting ? 'Saving…' : 'Save admission'}
           </PrimaryButton>
         </form>

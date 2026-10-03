@@ -7,6 +7,8 @@ namespace NeuroStrokeCare.Core.Features.Admission.Dtos
     {
         public Guid Id { get; set; }
         public Guid PatientId { get; set; }
+        public string PatientName { get; set; } = string.Empty;
+        public string? PatientHospitalNumber { get; set; }
         public DateTime AdmissionTime { get; set; }
         public PatientStatus Status { get; set; }
         public StrokeType? StrokeType { get; set; }
